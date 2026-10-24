@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>tastearr</Name>
+  <Repository>ghcr.io/moritranslates/tastearr:latest</Repository>
+  <Registry>https://github.com/MoriTranslates/tastearr/pkgs/container/tastearr</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/MoriTranslates/tastearr/issues</Support>
+  <Project>https://github.com/MoriTranslates/tastearr</Project>
+  <Overview>Tastearr learns your anime taste from your Sonarr library, Plex/Jellyfin watch history and a quick quiz, then recommends each new season's shows and adds the ones you pick to Sonarr. Optional phone alerts (ntfy, Gotify, Discord) for new episodes and new-season picks.</Overview>
+  <Category>MediaApp:Video Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8383]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/MoriTranslates/tastearr/main/web/public/favicon.svg</Icon>
+  <ExtraParams>--user 99:100</ExtraParams>
+  <Config Name="Web UI port" Target="8383" Default="8383" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true">8383</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/tastearr" Mode="rw" Description="Database and settings" Type="Path" Display="always" Required="true">/mnt/user/appdata/tastearr</Config>
+  <Config Name="Appdata (read-only, for auto-detect)" Target="/appdata" Default="/mnt/user/appdata" Mode="ro" Description="Optional. Lets Tastearr read Sonarr/Radarr API keys and the Plex token so setup is one click." Type="Path" Display="always" Required="false">/mnt/user/appdata</Config>
+  <Config Name="Docker socket (read-only, for auto-detect)" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Optional. Lets auto-detect find your containers' addresses. Remove if you'd rather not share it." Type="Path" Display="advanced" Required="false">/var/run/docker.sock</Config>
+  <Config Name="Host IP" Target="TASTEARR_HOST_IP" Default="" Mode="" Description="Optional. Your server's LAN IP, used by auto-detect for apps on bridge networking." Type="Variable" Display="advanced" Required="false"></Config>
+</Container>
