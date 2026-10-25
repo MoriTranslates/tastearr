@@ -2,7 +2,7 @@ import { db } from "./db.js";
 import { getSettings, type Settings } from "./settings.js";
 
 export interface SonarrSeason { seasonNumber: number; monitored: boolean; statistics?: { episodeFileCount: number; totalEpisodeCount: number; episodeCount: number } }
-export interface SonarrSeries { id: number; tvdbId: number; title: string; seriesType: string; status: string; monitored: boolean; seasons: SonarrSeason[]; [k: string]: unknown }
+export interface SonarrSeries { id: number; tvdbId: number; title: string; seriesType: string; status: string; monitored: boolean; seasons: SonarrSeason[]; instance?: number; [k: string]: unknown }
 
 type Conn = Pick<Settings["sonarr"], "url" | "apiKey">;
 
@@ -37,9 +37,22 @@ export async function sonarrOptions(conn: Conn = getSettings().sonarr) {
 
 let seriesCache: { at: number; list: SonarrSeries[] } | null = null;
 
+/** Main Sonarr first, then any extra instances. A series' `instance` is its index here. */
+const connOf = (i = 0): Conn => (i === 0 ? getSettings().sonarr : (getSettings().sonarrExtra[i - 1] ?? { url: "", apiKey: "" }));
+
+/** Every series across all Sonarr instances. The main instance wins when the same show is in two. */
 export async function sonarrSeries(force = false): Promise<SonarrSeries[]> {
   if (!force && seriesCache && Date.now() - seriesCache.at < 5 * 60_000) return seriesCache.list;
-  const list = await call<SonarrSeries[]>("GET", "/series");
+  const list = (await call<SonarrSeries[]>("GET", "/series")).map((x) => ({ ...x, instance: 0 }));
+  const have = new Set(list.map((x) => x.tvdbId));
+  const extra = getSettings().sonarrExtra;
+  for (let i = 0; i < extra.length; i++) {
+    try {
+      for (const x of await call<SonarrSeries[]>("GET", "/series", undefined, extra[i])) if (!have.has(x.tvdbId)) list.push({ ...x, instance: i + 1 });
+    } catch (e) {
+      console.warn(`Sonarr "${extra[i].name}" unreachable: ${(e as Error).message}`);
+    }
+  }
   seriesCache = { at: Date.now(), list };
   return list;
 }
@@ -77,11 +90,13 @@ export interface AddPlan {
   rootFolder: string;
   tags: string[];
   options: { value: MonitorChoice; label: string }[];
+  /** Seasons TVDB lists for the series, so a hand-matched show can pick its season. */
+  seasons: number[];
 }
 
 /** Default monitoring for a pick: a sequel the user doesn't own gets only its season; anything unclear gets "future". */
-function defaultMonitor(season: number | null, cfg = getSettings().sonarr): MonitorChoice {
-  if (season === 1) return "all";
+function defaultMonitor(season: number | null, cfg = getSettings().sonarr, firstOfMany = false): MonitorChoice {
+  if (season === 1) return firstOfMany ? "future" : "all";
   if (season && season > 1) return cfg.sequelMonitor === "newSeason" ? "season" : "all";
   return "future"; // season unknown or specials: never grab a whole back catalogue by surprise
 }
@@ -93,12 +108,13 @@ const MONITOR_LABEL: Record<MonitorChoice, (s: number | null) => string> = {
   none: () => "Nothing (add it unmonitored)",
 };
 
-export async function planAdd(tvdbId: number, season: number | null): Promise<AddPlan> {
+export async function planAdd(tvdbId: number, season: number | null, firstOfMany = false): Promise<AddPlan> {
   const cfg = getSettings().sonarr;
   const [s] = await call<SonarrSeries[]>("GET", `/series/lookup?term=tvdb:${tvdbId}`);
   if (!s) throw new Error(`Sonarr found no series for TVDB ${tvdbId}`);
   const [profiles, tags] = await Promise.all([call<{ id: number; name: string }[]>("GET", "/qualityprofile"), call<{ id: number; label: string }[]>("GET", "/tag")]);
-  const monitor = defaultMonitor(season, cfg);
+  const monitor = defaultMonitor(season, cfg, firstOfMany);
+  const seasonListed = !season || s.seasons.some((x) => x.seasonNumber === season);
   const options: { value: MonitorChoice; label: string }[] = [];
   if (season && season > 1) options.push({ value: "season", label: MONITOR_LABEL.season(season) });
   options.push({ value: "all", label: MONITOR_LABEL.all(null) }, { value: "future", label: MONITOR_LABEL.future(null) }, { value: "none", label: MONITOR_LABEL.none(null) });
@@ -108,44 +124,57 @@ export async function planAdd(tvdbId: number, season: number | null): Promise<Ad
     monitor,
     monitorLabel: MONITOR_LABEL[monitor](season),
     season,
-    seasonListed: !season || s.seasons.some((x) => x.seasonNumber === season),
-    search: cfg.searchOnAdd && monitor !== "none" && monitor !== "future",
+    seasonListed,
+    // Mirrors addSeries: Sonarr only searches when there's something listed to search for.
+    search: cfg.searchOnAdd && (monitor === "all" || (monitor === "season" && seasonListed)),
     profile: profiles.find((p) => p.id === cfg.qualityProfileId)?.name ?? null,
     rootFolder: cfg.rootFolderPath,
     tags: [...tags.filter((t) => cfg.tags.includes(t.id)).map((t) => t.label), "tastearr"],
     options,
+    seasons: s.seasons.map((x) => x.seasonNumber).filter((n) => n > 0),
   };
 }
 
 /** Sonarr's own title search: the fallback when the community AniList -> TVDB list hasn't caught up yet. */
-export async function lookupByTitle(titles: string[]) {
-  const seen = new Map<number, { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null }>();
+export async function lookupByTitle(titles: string[], year: number | null = null) {
+  const seen = new Map<number, { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean; rank: number }>();
+  const owned = new Set((await sonarrSeries().catch(() => [] as SonarrSeries[])).map((x) => x.tvdbId));
+  const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2));
+  const want = words(titles.join(" "));
   for (const t of titles.filter(Boolean).slice(0, 2)) {
     for (const x of (await call<SonarrSeries[]>("GET", `/series/lookup?term=${encodeURIComponent(t)}`)).slice(0, 6)) {
       if (!x.tvdbId || seen.has(x.tvdbId)) continue;
+      const y = (x.year as number | undefined) || null;
+      const have = words(x.title);
+      const overlap = [...have].filter((w) => want.has(w)).length / Math.max(1, have.size);
+      // Best guess first: title overlap, a little extra when it's a series already in Sonarr (a new season of something
+      // owned) and still a close title, then a plausible year (a series can't start after the show we're matching).
+      const rank = overlap * 2 + (owned.has(x.tvdbId) && overlap >= 0.5 ? 0.5 : 0) + (year && y ? (Math.abs(year - y) <= 1 ? 0.5 : y > year ? -1 : 0) : 0);
       seen.set(x.tvdbId, {
         tvdbId: x.tvdbId,
         title: x.title,
-        year: (x.year as number | undefined) ?? null,
+        year: y,
         network: (x.network as string | undefined) ?? null,
-        seasons: x.seasons.map((y) => y.seasonNumber).filter((n) => n > 0),
+        seasons: x.seasons.map((z) => z.seasonNumber).filter((n) => n > 0),
         overview: ((x.overview as string | undefined) ?? "").slice(0, 200) || null,
+        inLibrary: owned.has(x.tvdbId),
+        rank,
       });
     }
   }
-  return [...seen.values()];
+  return [...seen.values()].sort((a, b) => b.rank - a.rank).map(({ rank: _r, ...c }) => c);
 }
 
 /**
  * Adds a show to Sonarr as an anime series with the chosen monitoring. The default (see defaultMonitor) never
  * downloads a back catalogue the user didn't ask for: sequels get only their season, unclear cases only new episodes.
  */
-export async function addSeries(tvdbId: number, season: number | null, opts: { monitor?: MonitorChoice; search?: boolean } = {}) {
+export async function addSeries(tvdbId: number, season: number | null, opts: { monitor?: MonitorChoice; search?: boolean; firstOfMany?: boolean } = {}) {
   const cfg = getSettings().sonarr;
   if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw new Error("Pick a quality profile and root folder in Settings first");
   const [s] = await call<SonarrSeries[]>("GET", `/series/lookup?term=tvdb:${tvdbId}`);
   if (!s) throw new Error(`Sonarr found no series for TVDB ${tvdbId}`);
-  let monitor = opts.monitor ?? defaultMonitor(season, cfg);
+  let monitor = opts.monitor ?? defaultMonitor(season, cfg, opts.firstOfMany);
   if (monitor === "season" && !(season && season > 1)) monitor = "future";
   const listed = monitor === "season" && s.seasons.some((x) => x.seasonNumber === season);
   for (const x of s.seasons) x.monitored = monitor === "all" ? x.seasonNumber > 0 : monitor === "season" ? listed && x.seasonNumber === season : false;
@@ -174,9 +203,10 @@ export async function addSeries(tvdbId: number, season: number | null, opts: { m
   return { id: added.id, title: added.title, monitored: MONITOR_LABEL[monitor](season), waitingForSeason: monitor === "season" && !listed };
 }
 
-export async function setMonitored(seriesId: number, monitored: boolean) {
-  const full = await call<SonarrSeries>("GET", `/series/${seriesId}`);
-  await call("PUT", `/series/${seriesId}`, { ...full, monitored });
+export async function setMonitored(seriesId: number, monitored: boolean, instance = 0) {
+  const c = connOf(instance);
+  const full = await call<SonarrSeries>("GET", `/series/${seriesId}`, undefined, c);
+  await call("PUT", `/series/${seriesId}`, { ...full, monitored }, c);
   seriesCache = null;
 }
 
@@ -186,18 +216,19 @@ export async function seriesMonitored(tvdbId: number) {
 }
 
 /** Monitors one season of a series that's already in Sonarr (refreshing it first if TVDB is newer) and searches for it. */
-export async function monitorSeason(tvdbId: number, season: number) {
+export async function monitorSeason(tvdbId: number, season: number, search = getSettings().sonarr.searchOnAdd) {
   const s = (await sonarrSeries(true)).find((x) => x.tvdbId === tvdbId);
   if (!s) throw new Error("Series is not in Sonarr");
-  let full = await call<SonarrSeries>("GET", `/series/${s.id}`);
+  const c = connOf(s.instance);
+  let full = await call<SonarrSeries>("GET", `/series/${s.id}`, undefined, c);
   if (!full.seasons.some((x) => x.seasonNumber === season)) {
-    const cmd = await call<{ id: number }>("POST", "/command", { name: "RefreshSeries", seriesId: s.id });
+    const cmd = await call<{ id: number }>("POST", "/command", { name: "RefreshSeries", seriesId: s.id }, c);
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 2000));
-      const st = await call<{ status: string }>("GET", `/command/${cmd.id}`);
+      const st = await call<{ status: string }>("GET", `/command/${cmd.id}`, undefined, c);
       if (st.status === "completed" || st.status === "failed") break;
     }
-    full = await call<SonarrSeries>("GET", `/series/${s.id}`);
+    full = await call<SonarrSeries>("GET", `/series/${s.id}`, undefined, c);
   }
   const target = full.seasons.find((x) => x.seasonNumber === season);
   // Series-level monitoring is what makes Sonarr grab new episodes; the preview tells the user when this flips it back on.
@@ -205,9 +236,9 @@ export async function monitorSeason(tvdbId: number, season: number) {
   full.monitored = true;
   if (target) target.monitored = true;
   else full.monitorNewItems = "all"; // TVDB hasn't listed it yet; Sonarr monitors it when it appears
-  await call("PUT", `/series/${s.id}`, full);
+  await call("PUT", `/series/${s.id}`, full, c);
   db.prepare("DELETE FROM dropped WHERE tvdb_id = ?").run(tvdbId);
-  if (target && getSettings().sonarr.searchOnAdd) await call("POST", "/command", { name: "SeasonSearch", seriesId: s.id, seasonNumber: season });
+  if (target && search) await call("POST", "/command", { name: "SeasonSearch", seriesId: s.id, seasonNumber: season }, c);
   seriesCache = null;
   return { id: s.id, title: s.title, season, waitingForSeason: !target, resumedSeries: resumed };
 }

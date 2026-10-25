@@ -17,7 +17,10 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# Runs unprivileged by default (Unraid overrides this with --user 99:100).
+RUN mkdir -p /config && chown node:node /config
+USER node
 VOLUME /config
 EXPOSE 8383
-HEALTHCHECK --interval=60s --timeout=5s CMD wget -qO- http://127.0.0.1:8383/api/status >/dev/null || exit 1
+HEALTHCHECK --interval=60s --timeout=5s CMD wget -qO- http://127.0.0.1:8383/ping >/dev/null || exit 1
 CMD ["node", "--no-warnings=ExperimentalWarning", "dist/server/index.js"]

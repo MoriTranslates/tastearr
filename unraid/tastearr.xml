@@ -16,6 +16,8 @@
   <Config Name="Web UI port" Target="8383" Default="8383" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true">8383</Config>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/tastearr" Mode="rw" Description="Database and settings" Type="Path" Display="always" Required="true">/mnt/user/appdata/tastearr</Config>
   <Config Name="Sonarr config folder (optional, read-only)" Target="/appdata/sonarr" Default="" Mode="ro" Description="Optional. Point at Sonarr's appdata folder (e.g. /mnt/user/appdata/sonarr) so Tastearr can read its API key during setup. You can remove it afterwards." Type="Path" Display="always" Required="false"></Config>
+  <Config Name="Radarr config folder (optional, read-only)" Target="/appdata/radarr" Default="" Mode="ro" Description="Optional. Point at Radarr's appdata folder so Tastearr can read its API key during setup." Type="Path" Display="advanced" Required="false"></Config>
   <Config Name="Trusted proxy" Target="TRUST_PROXY" Default="" Mode="" Description="Optional. If you use a reverse proxy, set its IP or subnet (e.g. 172.18.0.0/16) so client IPs are read correctly. Never 'true'." Type="Variable" Display="advanced" Required="false"></Config>
-  <Config Name="TZ" Target="TZ" Default="" Mode="" Description="Your time zone, e.g. America/Toronto" Type="Variable" Display="advanced" Required="false"></Config>
+  <Config Name="TZ" Target="TZ" Default="" Mode="" Description="Your time zone, e.g. America/Toronto (Unraid fills this in automatically)" Type="Variable" Display="advanced" Required="false"></Config>
+  <Config Name="UMASK" Target="UMASK" Default="022" Mode="" Description="File permission mask for files Tastearr writes in /config" Type="Variable" Display="advanced" Required="false">022</Config>
 </Container>

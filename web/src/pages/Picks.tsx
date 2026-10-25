@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, seasonName, shiftSeason, store, type AddPlan, type Candidate, type Pick, type Season, type Section, type Status } from "../api";
 import { airLabel, dateLabel, ErrorBox, Modal, Spinner, usePageTitle, useToast } from "../ui";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "continuing", label: "Continuing", hint: "New seasons of shows you know, and shows still airing" },
   { id: "new", label: "New shows", hint: "Brand-new series this season" },
-  { id: "shorts", label: "Shorts", hint: "Short episodes (15 minutes or less)" },
+  { id: "shorts", label: "Shorts", hint: "Mini episodes (a few minutes each)" },
   { id: "movies", label: "Movies", hint: "Films and theatrical releases" },
 ];
 const SORTS = {
@@ -46,17 +46,22 @@ export function Picks({ status }: { status: Status }) {
   const [view, setView] = useState(init.view);
   const [day, setDay] = useState<number | null>(init.day);
   const [sort, setSort] = useState<SortKey>(() => store.get("sort", "match"));
-  const [services, setServices] = useState<string[]>(() => store.get("services", []));
-  const [showLibrary, setShowLibrary] = useState(() => store.get("showLibrary", !hideInLibrary));
+  // Settings defaults (my services, hide in library, hide shorts) apply until the viewer changes the toggle here.
+  const [services, setServicesRaw] = useState<string[]>(() => store.get<string[] | null>("services", null) ?? status.prefs?.services ?? []);
+  const [showLibrary, setShowLibraryRaw] = useState(() => store.get<boolean | null>("showLibrary", null) ?? !hideInLibrary);
   const [showFiltered, setShowFiltered] = useState(false);
-  const [collapsed, setCollapsed] = useState<Section[]>(() => store.get("collapsed", hideShorts ? (["shorts"] as Section[]) : []));
+  const [collapsed, setCollapsedRaw] = useState<Section[]>(() => store.get<Section[] | null>("collapsed", null) ?? (hideShorts ? ["shorts"] : []));
+  const setServices = (v: string[]) => (setServicesRaw(v), store.set("services", v));
+  const setShowLibrary = (v: boolean) => (setShowLibraryRaw(v), store.set("showLibrary", v));
+  const setCollapsed = (v: Section[]) => (setCollapsedRaw(v), store.set("collapsed", v));
+  const [lowOpen, setLowOpen] = useState<Section[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(() => !isMobile());
   const key = `${sel.season}-${sel.year}`;
   const [picks, setPicks] = useState<Pick[] | null>(() => cache.get(key) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [refresh, setRefresh] = useState(false);
-  const [adding, setAdding] = useState<Pick | null>(null);
+  const [adding, setAdding] = useState<{ p: Pick; mode: "add" | "monitor" } | null>(null);
   usePageTitle(`${seasonName(sel.season)} ${sel.year}`);
 
   useEffect(() => {
@@ -67,9 +72,6 @@ export function Picks({ status }: { status: Status }) {
     store.set("view", view);
   }, [sel, view, day]);
   useEffect(() => store.set("sort", sort), [sort]);
-  useEffect(() => store.set("services", services), [services]);
-  useEffect(() => store.set("showLibrary", showLibrary), [showLibrary]);
-  useEffect(() => store.set("collapsed", collapsed), [collapsed]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -83,23 +85,45 @@ export function Picks({ status }: { status: Status }) {
         setRefresh(false);
       })
       .catch((e) => {
-        if (!ctrl.signal.aborted && !cached) setError((e as Error).message);
+        if (ctrl.signal.aborted) return;
+        setRefresh(false);
+        if (!cached) setError((e as Error).message);
       });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, reload]);
 
-  const patch = useCallback(
-    (id: number, change: Partial<Pick>) =>
-      setPicks((list) => {
-        const next = list?.map((p) => (p.id === id ? { ...p, ...change } : p)) ?? null;
-        if (next) cache.set(key, next);
-        return next;
-      }),
-    [key],
-  );
+  // The taste profile is rebuilding (e.g. the quiz was just retaken): show the old ranking, then refetch.
+  const [rebuilding, setRebuilding] = useState(!!status.building);
+  useEffect(() => {
+    if (!rebuilding) return;
+    let alive = true;
+    const poll = async () => {
+      const st = await api<Status>("/status").catch(() => null);
+      if (!alive) return;
+      if (st && !st.building) {
+        cache.clear();
+        setRebuilding(false);
+        setReload((x) => x + 1);
+      } else setTimeout(poll, 3000);
+    };
+    const t = setTimeout(poll, 3000);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [rebuilding]);
 
-  const allServices = useMemo(() => [...new Set((picks ?? []).flatMap((p) => p.streaming.map((x) => x.site)))].sort(), [picks]);
+  // Changes are written to the season they were made in, even if the viewer has since switched season.
+  const currentKey = useRef(key);
+  currentKey.current = key;
+  const patch = useCallback((id: number, change: Partial<Pick>, k = currentKey.current) => {
+    const next = cache.get(k)?.map((p) => (p.id === id ? { ...p, ...change } : p));
+    if (next) cache.set(k, next);
+    if (k === currentKey.current) setPicks((list) => list?.map((p) => (p.id === id ? { ...p, ...change } : p)) ?? null);
+  }, []);
+
+  const allServices = useMemo(() => [...new Set([...services, ...(picks ?? []).flatMap((p) => p.streaming.map((x) => x.site))])].sort(), [picks, services]);
   const visible = useMemo(() => {
     const list = (picks ?? []).filter(
       (p) =>
@@ -111,9 +135,18 @@ export function Picks({ status }: { status: Status }) {
     return list.sort(SORTS[sort].fn);
   }, [picks, showFiltered, showLibrary, services, day, sort]);
   const hidden = (picks?.length ?? 0) - visible.length;
+  // Something new to start: streamable or addable, not a movie or mini, and never a sequel to something not seen.
   const top = useMemo(
-    () => (picks ?? []).filter((p) => !p.excluded && !p.inLibrary && !p.myStatus && !p.following && p.section !== "shorts").sort((a, b) => b.match - a.match)[0] ?? null,
-    [picks],
+    () =>
+      (picks ?? [])
+        .filter(
+          (p) =>
+            !p.excluded && !p.inLibrary && !p.myStatus && !p.following && !p.verdict && (p.section === "new" || p.section === "continuing") &&
+            (p.streaming.length > 0 || p.addVia || p.needsMatch) && (!p.continues || p.continues.kept) &&
+            (!services.length || p.streaming.some((x) => services.includes(x.site))),
+        )
+        .sort((a, b) => b.match - a.match)[0] ?? null,
+    [picks, services],
   );
   const filterCount = (day !== null ? 1 : 0) + services.length + (showLibrary ? 0 : 1) + (showFiltered ? 1 : 0);
   const isCurrent = sel.season === status.season?.season && sel.year === status.season?.year;
@@ -141,12 +174,12 @@ export function Picks({ status }: { status: Status }) {
                 setDay(todayIdx());
               }}
             >
-              Tonight
+              Today
             </button>
           )}
-          <div className="seg" role="radiogroup" aria-label="View">
+          <div className="seg" role="group" aria-label="View">
             {(["grid", "schedule"] as const).map((v) => (
-              <button key={v} role="radio" aria-checked={view === v} className={view === v ? "on" : ""} onClick={() => setView(v)}>
+              <button key={v} aria-pressed={view === v} className={view === v ? "on" : ""} onClick={() => setView(v)}>
                 {v === "grid" ? "Picks" : "Schedule"}
               </button>
             ))}
@@ -228,18 +261,24 @@ export function Picks({ status }: { status: Status }) {
         </p>
       )}
 
-      {picks && view === "grid" && top && day === null && !services.length && (
+      {rebuilding && <p className="banner">Updating your picks with your new answers…</p>}
+
+      {picks && view === "grid" && top && day === null && (
         <div className="hero">
           <h2 className="small muted">Top pick for you</h2>
-          <PickCard p={top} patch={patch} toast={toast} status={status} onAdd={setAdding} />
+          <PickCard p={top} patch={patch} toast={toast} status={status} onAdd={(p, mode = "add") => setAdding({ p, mode })} />
         </div>
       )}
 
       {picks && view === "grid" &&
         SECTIONS.map((sec) => {
-          const items = visible.filter((p) => p.section === sec.id);
-          if (!items.length) return null;
+          const all = visible.filter((p) => p.section === sec.id && p.id !== top?.id);
+          if (!all.length) return null;
           const open = !collapsed.includes(sec.id);
+          // Low matches (mostly kids minis and promos in Shorts) wait behind "show more" unless sorted otherwise.
+          const cut = sec.id === "shorts" ? 20 : 15;
+          const low = sort === "match" && !lowOpen.includes(sec.id) ? all.filter((p) => p.match < cut && !p.inLibrary && !p.myStatus && !p.following) : [];
+          const items = all.filter((p) => !low.includes(p));
           return (
             <div key={sec.id} className="section">
               <h2 className="section-head">
@@ -248,30 +287,37 @@ export function Picks({ status }: { status: Status }) {
                     {open ? "▾" : "▸"}
                   </span>
                   {sec.label}
-                  <span className="count">{items.length}</span>
+                  <span className="count">{all.length}</span>
                 </button>
                 <span className="muted small hint">{sec.hint}</span>
               </h2>
               {open && (
-                <div className="grid">
-                  {items.map((p) => (
-                    <PickCard key={p.id} p={p} patch={patch} toast={toast} status={status} onAdd={setAdding} />
-                  ))}
-                </div>
+                <>
+                  <div className="grid">
+                    {items.map((p) => (
+                      <PickCard key={p.id} p={p} patch={patch} toast={toast} status={status} onAdd={(p, mode = "add") => setAdding({ p, mode })} />
+                    ))}
+                  </div>
+                  {low.length > 0 && (
+                    <button className="ghost small more-low" onClick={() => setLowOpen([...lowOpen, sec.id])}>
+                      Show {low.length} more that don't look like your thing
+                    </button>
+                  )}
+                </>
               )}
             </div>
           );
         })}
 
-      {picks && view === "schedule" && <Schedule picks={visible} all={picks} day={day} patch={patch} toast={toast} status={status} onAdd={setAdding} isCurrent={isCurrent} />}
-      {adding && <AddDialog p={adding} onClose={() => setAdding(null)} patch={patch} toast={toast} />}
+      {picks && view === "schedule" && <Schedule picks={visible} all={picks} day={day} patch={patch} toast={toast} status={status} onAdd={(p, mode = "add") => setAdding({ p, mode })} isCurrent={isCurrent} />}
+      {adding && <AddDialog p={adding.p} mode={adding.mode} onClose={() => setAdding(null)} patch={patch} toast={toast} />}
     </section>
   );
 }
 
 // ---------------------------------------------------------------- schedule
 
-type CardProps = { patch: (id: number, c: Partial<Pick>) => void; toast: ReturnType<typeof useToast>; status: Status; onAdd: (p: Pick) => void };
+type CardProps = { patch: (id: number, c: Partial<Pick>) => void; toast: ReturnType<typeof useToast>; status: Status; onAdd: (p: Pick, mode?: "add" | "monitor") => void };
 
 function Schedule({ picks, all, day, isCurrent, ...card }: CardProps & { picks: Pick[]; all: Pick[]; day: number | null; isCurrent: boolean }) {
   const airing = all.filter((p) => p.nextAiring);
@@ -348,7 +394,10 @@ function SchedRow({ p }: { p: Pick }) {
       <a href={p.siteUrl} target="_blank" rel="noreferrer">
         {p.title}
       </a>
-      <span className="muted small">ep {p.nextAiring!.episode}</span>
+      <span className="muted small">
+        ep {p.nextAiring!.episode}
+        {p.nextAiring!.at - Date.now() > 6 * 86_400_000 ? " (next week; this week's is out)" : ""}
+      </span>
       {p.streaming.slice(0, 2).map((s) => (
         <a key={s.site} className="chip link" href={s.url} target="_blank" rel="noreferrer">
           ▶ {s.site}
@@ -372,6 +421,7 @@ function storyLine(p: Pick) {
     if (p.continues.behind > 0) return `Sequel to ${p.continues.title}. You're ${p.continues.behind} season${p.continues.behind > 1 ? "s" : ""} behind.`;
     return p.continues.kept ? `Continues ${p.continues.title}` : `Sequel to ${p.continues.title}`;
   }
+  if (p.compilationOf) return `Compilation of ${p.compilationOf.title}${p.compilationOf.seen ? " (you've seen it)" : ""}`;
   if (p.spinOffOf) return `Spin-off of ${p.spinOffOf}`;
   if (p.similar) return `Similar to ${p.similar}`;
   return null;
@@ -401,20 +451,6 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
     }
   }
 
-  async function monitor() {
-    if (!confirm(`Turn on season ${p.tvdbSeason} of ${p.title} in Sonarr and search for it?`)) return;
-    setBusy(true);
-    try {
-      const r = await api<{ waitingForSeason?: boolean; resumedSeries?: boolean }>(`/picks/${p.id}/monitor`, { body: {} });
-      patch(p.id, { seasonMonitored: true, verdict: "added" });
-      toast(`Season ${p.tvdbSeason} turned on in Sonarr${r.resumedSeries ? " (the series was switched back on too)" : ""}${r.waitingForSeason ? ". TVDB hasn't listed it yet; Sonarr will grab it when it does." : ""}`);
-    } catch (e) {
-      toast((e as Error).message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function rate(verdict: "liked" | "disliked" | "hidden") {
     const prev = { verdict: p.verdict, excluded: p.excluded };
     const next = p.verdict === verdict ? null : verdict;
@@ -437,7 +473,7 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
     }
   }
 
-  const meta = [p.format === "TV_SHORT" ? "Short" : p.format === "ONA" ? "Web" : p.format === "MOVIE" ? "Movie" : "TV", p.episodes && `${p.episodes} eps`, p.duration && p.duration <= 15 ? `${p.duration} min` : null, p.studio, p.source].filter(Boolean).join(" · ");
+  const meta = [p.format === "TV_SHORT" && (!p.duration || p.duration <= 9) ? "Short" : p.format === "ONA" ? "Web" : p.format === "MOVIE" ? "Movie" : "TV", p.episodes && `${p.episodes} eps`, p.duration && p.duration <= 15 ? `${p.duration} min` : null, p.studio, p.source].filter(Boolean).join(" · ");
   const when =
     p.format === "MOVIE"
       ? p.startDate
@@ -458,7 +494,7 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
   if (p.inLibrary) {
     primary =
       p.seasonMonitored === false && p.tvdbSeason ? (
-        <button className="primary" disabled={busy} onClick={monitor}>
+        <button className="primary" disabled={busy} onClick={() => onAdd(p, "monitor")}>
           Get season {p.tvdbSeason}
         </button>
       ) : (
@@ -489,6 +525,7 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
         <p className="meta">{meta}</p>
         {when && <p className="meta airing">{when}</p>}
         {p.myStatus && <span className="badge status">{STATUS_BADGE[p.myStatus]}</span>}
+        {p.matchGuessed && p.inLibrary && <span className="badge muted" title="The anime database hasn't matched this season yet; Tastearr used the earlier season's Sonarr entry">Matched by earlier season</span>}
         <div className="match">
           <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.match} aria-label="Match">
             <div style={{ width: `${p.match}%` }} />
@@ -578,7 +615,7 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
             <button className={`icon${p.verdict === "disliked" ? " on" : ""}`} title="Not for me" aria-label={`Not for me: ${p.title}`} aria-pressed={p.verdict === "disliked"} onClick={() => rate("disliked")}>
               👎
             </button>
-            <button className={`ghost small hide${p.verdict === "hidden" ? " on" : ""}`} title="Hide from my picks" aria-pressed={p.verdict === "hidden"} onClick={() => rate("hidden")}>
+            <button className={`ghost small hide${p.verdict === "hidden" ? " on" : ""}`} title="Hide from my picks" aria-label={`Hide ${p.title}`} aria-pressed={p.verdict === "hidden"} onClick={() => rate("hidden")}>
               Hide
             </button>
           </div>
@@ -590,33 +627,61 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
 
 // ---------------------------------------------------------------- add dialog
 
-function AddDialog({ p, onClose, patch, toast }: { p: Pick; onClose: () => void; patch: CardProps["patch"]; toast: CardProps["toast"] }) {
+type Mode = "add" | "monitor";
+
+/** One preview dialog for every Sonarr/Radarr write: add, add after picking a match, and "get season N". */
+function AddDialog({ p, mode, onClose, patch, toast }: { p: Pick; mode: Mode; onClose: () => void; patch: CardProps["patch"]; toast: CardProps["toast"] }) {
   const [plan, setPlan] = useState<AddPlan | null>(null);
   const [cands, setCands] = useState<Candidate[] | null>(null);
-  const [match, setMatch] = useState<{ tvdbId: number; season: number | null } | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [match, setMatch] = useState<Candidate | null>(null);
+  const [season, setSeason] = useState<number | null>(null);
   const [monitor, setMonitor] = useState<AddPlan["monitor"]>();
   const [search, setSearch] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    api<AddPlan>(`/picks/${p.id}/plan`)
-      .then((x) => {
-        setPlan(x);
-        setMonitor(x.monitor);
-        setSearch(x.search ?? true);
-        if (x.needsMatch) api<Candidate[]>(`/picks/${p.id}/candidates`).then(setCands).catch((e) => setError(e.message));
-      })
-      .catch((e) => setError(e.message));
-  }, [p.id]);
+  const loadPlan = useCallback(
+    (q = "") =>
+      api<AddPlan>(`/picks/${p.id}/plan${q}`)
+        .then((x) => {
+          setPlan(x);
+          setMonitor(x.monitor);
+          setSeason(x.season ?? null);
+          setSearch(x.search ?? true);
+          if (x.needsMatch && !q) api<Candidate[]>(`/picks/${p.id}/candidates`).then(setCands).catch((e) => setError(e.message));
+        })
+        .catch((e) => setError(e.message)),
+    [p.id],
+  );
+  useEffect(() => void loadPlan(), [loadPlan]);
 
-  async function add() {
+  function pick(c: Candidate | null, s: number | null = null) {
+    setMatch(c);
+    setError(null);
+    if (!c) return void loadPlan();
+    setPlan(null);
+    void loadPlan(`?tvdbId=${c.tvdbId}${s ? `&season=${s}` : ""}`);
+  }
+
+  const canSearch = monitor === "all" || ((monitor === "season" || mode === "monitor") && plan?.seasonListed !== false);
+  async function go() {
     setBusy(true);
     try {
-      const body = plan?.app === "sonarr" ? { monitor, search, ...(match ? { tvdbId: match.tvdbId, season: match.season } : {}) } : {};
-      const r = await api<{ title: string; monitored?: string; waitingForSeason?: boolean }>(`/picks/${p.id}/add`, { body });
-      patch(p.id, { inLibrary: true, seasonMonitored: true, verdict: "added", needsMatch: false });
-      toast(`${r.title} added to ${plan?.app === "radarr" ? "Radarr" : "Sonarr"}${r.monitored ? ` (${r.monitored.toLowerCase()})` : ""}${r.waitingForSeason ? ". TVDB hasn't listed the new season yet; Sonarr will grab it when it does." : ""}`);
+      if (mode === "monitor") {
+        const r = await api<{ waitingForSeason?: boolean; resumedSeries?: boolean }>(`/picks/${p.id}/monitor`, { body: { search: canSearch && search } });
+        patch(p.id, { seasonMonitored: true, verdict: "added" });
+        toast(`Season ${p.tvdbSeason} turned on in Sonarr${r.resumedSeries ? " (the series was switched back on too)" : ""}${r.waitingForSeason ? ". TVDB hasn't listed it yet; Sonarr will grab it when it does." : ""}`);
+      } else {
+        const body = plan?.app === "sonarr" ? { monitor, search: canSearch && search, ...(match ? { tvdbId: match.tvdbId, season } : {}) } : {};
+        const r = await api<{ title: string; monitored?: string; waitingForSeason?: boolean; alreadyInLibrary?: boolean }>(`/picks/${p.id}/add`, { body });
+        patch(p.id, { inLibrary: true, seasonMonitored: true, verdict: "added", needsMatch: false });
+        toast(
+          r.alreadyInLibrary
+            ? `${r.title} is already in Sonarr; matched for next time`
+            : `${r.title} added to ${plan?.app === "radarr" ? "Radarr" : "Sonarr"}${r.monitored ? ` (${r.monitored.toLowerCase()})` : ""}${r.waitingForSeason ? ". TVDB hasn't listed the new season yet; Sonarr will grab it when it does." : ""}`,
+        );
+      }
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -625,62 +690,97 @@ function AddDialog({ p, onClose, patch, toast }: { p: Pick; onClose: () => void;
     }
   }
 
+  const choosing = plan?.needsMatch && !match;
+  const [best, ...rest] = cands ?? [];
   return (
-    <Modal title={`Add ${p.title}`} onClose={onClose}>
+    <Modal title={mode === "monitor" ? `Get season ${p.tvdbSeason} of ${p.title}` : `Add ${p.title}`} onClose={onClose}>
       {error && <p className="error">{error}</p>}
       {!plan && !error && <Spinner label="Checking with Sonarr…" />}
-      {plan?.needsMatch && !match && (
+      {choosing && (
         <>
-          <p className="small">The anime database Tastearr uses hasn't matched this show to Sonarr yet. Pick the right one:</p>
+          <p className="small">The anime database hasn't matched this show to Sonarr yet. Is this it?</p>
           {!cands && !error && <Spinner label="Searching Sonarr…" />}
           {cands && !cands.length && <p className="muted small">Sonarr couldn't find it either. Try again in a few days.</p>}
           <div className="cand-list">
-            {cands?.map((c) => (
-              <button
-                key={c.tvdbId}
-                className="cand"
-                onClick={() => {
-                  // A manual match doesn't tell us which TVDB season this is, so default to "only new episodes".
-                  setMatch({ tvdbId: c.tvdbId, season: null });
-                  setMonitor(c.seasons.length > 1 ? "future" : "all");
-                }}
-              >
-                <strong>{c.title}</strong> <span className="muted small">{[c.year, c.network, c.seasons.length ? `${c.seasons.length} season${c.seasons.length > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ")}</span>
-                {c.overview && <span className="muted small block">{c.overview}</span>}
+            {(showAll ? cands ?? [] : best ? [best] : []).map((c) => (
+              <button key={c.tvdbId} className={`cand${c === best ? " best" : ""}`} onClick={() => pick(c)}>
+                <strong>{c.title}</strong>{" "}
+                <span className="muted small">
+                  {[c.year, c.network, c.seasons.length ? `${c.seasons.length} season${c.seasons.length > 1 ? "s" : ""}` : null, c.inLibrary ? "already in Sonarr" : null].filter(Boolean).join(" · ")}
+                </span>
+                {c.overview && <span className="muted small block clamp2">{c.overview}</span>}
               </button>
             ))}
           </div>
+          {!showAll && rest.length > 0 && (
+            <button className="ghost small" onClick={() => setShowAll(true)}>
+              Not it? Show {rest.length} more
+            </button>
+          )}
         </>
       )}
-      {plan && (!plan.needsMatch || match) && (
+      {plan && !choosing && (
         <div className="stack">
-          {plan.app === "sonarr" && !plan.needsMatch && (
+          {plan.app === "sonarr" && (
             <ul className="plan small">
               <li>
                 <strong>{plan.title}</strong>
-                {plan.year ? ` (${plan.year})` : ""} as an anime series
+                {plan.year ? ` (${plan.year})` : ""} {plan.alreadyInLibrary ? "is already in Sonarr" : "as an anime series"}
+                {match && (
+                  <>
+                    {" · "}
+                    <button className="linklike small" onClick={() => pick(null)}>
+                      Change match
+                    </button>
+                  </>
+                )}
               </li>
-              <li>Quality: {plan.profile ?? "not set"} · Folder: {plan.rootFolder}</li>
-              <li>Tags: {plan.tags?.join(", ")}</li>
-              {plan.resumesSeries && <li className="warn">This series is switched off in Sonarr; adding this season turns it back on.</li>}
+              {mode === "add" && !plan.alreadyInLibrary && (
+                <>
+                  <li>Quality: {plan.profile ?? "not set"} · Folder: {plan.rootFolder}</li>
+                  <li>Tags: {plan.tags?.join(", ")}</li>
+                </>
+              )}
+              {mode === "monitor" && <li>Turns on season {p.tvdbSeason}{plan.seasonListed === false ? " (TVDB hasn't listed it yet; Sonarr grabs it when it does)" : ""}. Nothing else changes.</li>}
+              {plan.resumesSeries && <li className="warn">This series is switched off in Sonarr; this turns it back on.</li>}
             </ul>
           )}
+          {plan.app === "sonarr" && match && (plan.seasons?.length ?? 0) > 0 && (
+            <label className="field">
+              Which season is this?
+              <select
+                value={season ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value ? Number(e.target.value) : null;
+                  setSeason(v);
+                  void loadPlan(`?tvdbId=${match.tvdbId}${v ? `&season=${v}` : ""}`);
+                }}
+              >
+                <option value="">Not sure (only new episodes)</option>
+                {plan.seasons!.map((n) => (
+                  <option key={n} value={n}>
+                    Season {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {plan.app === "sonarr" && mode === "add" && !plan.alreadyInLibrary && (
+            <label className="field">
+              What to download
+              <select value={monitor} onChange={(e) => setMonitor(e.target.value as AddPlan["monitor"])}>
+                {(plan.options ?? []).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {plan.app === "sonarr" && (
-            <>
-              <label className="field">
-                What to download
-                <select value={monitor} onChange={(e) => setMonitor(e.target.value as AddPlan["monitor"])}>
-                  {(match ? [{ value: "all", label: "All seasons" }, { value: "future", label: "Only new episodes from now on" }, { value: "none", label: "Nothing (add it unmonitored)" }] : (plan.options ?? [])).map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="check small">
-                <input type="checkbox" checked={search} disabled={monitor === "none" || monitor === "future"} onChange={(e) => setSearch(e.target.checked)} /> Start searching right away
-              </label>
-            </>
+            <label className="check small">
+              <input type="checkbox" checked={canSearch && search} disabled={!canSearch} onChange={(e) => setSearch(e.target.checked)} /> Start searching right away
+            </label>
           )}
           {plan.app === "radarr" && (
             <ul className="plan small">
@@ -692,8 +792,8 @@ function AddDialog({ p, onClose, patch, toast }: { p: Pick; onClose: () => void;
             <button className="ghost" onClick={onClose}>
               Cancel
             </button>
-            <button className="primary" disabled={busy} onClick={add}>
-              {busy ? "Adding…" : "Add"}
+            <button className="primary" disabled={busy} onClick={go}>
+              {busy ? "Working…" : mode === "monitor" ? `Get season ${p.tvdbSeason}` : plan.alreadyInLibrary ? (season ? `Get season ${season}` : "Match it") : "Add"}
             </button>
           </div>
         </div>

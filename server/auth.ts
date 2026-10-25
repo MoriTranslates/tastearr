@@ -26,7 +26,7 @@ export function trustProxyOption(): number | string[] | false {
   if (/^\d+$/.test(v)) return Number(v);
   return v.split(",").map((x) => x.trim()).filter(Boolean);
 }
-const PROXY_TRUSTED = trustProxyOption() !== false;
+export const PROXY_TRUSTED = trustProxyOption() !== false;
 
 const hmac = (data: string) => crypto.createHmac("sha256", getSettings().secret).update(data).digest("base64url");
 
@@ -132,8 +132,9 @@ export function loginAllowed(ip: string, user: string) {
   if (a.until > now) return false;
   a.n++;
   a.seen = now;
-  // 5 free tries, then 2s, 4s, 8s ... capped at 5 minutes.
-  if (a.n > 5) a.until = now + Math.min(300_000, 1000 * 2 ** (a.n - 5));
+  // 5 free tries, then 2s, 4s, 8s ... capped at 15s. Password hashing (scrypt) is the real brake on guessing; a long
+  // lock would let anyone who knows the username keep the owner out (behind a proxy everyone shares one IP).
+  if (a.n > 5) a.until = now + Math.min(15_000, 1000 * 2 ** (a.n - 5));
   attempts.set(key, a);
   return true;
 }

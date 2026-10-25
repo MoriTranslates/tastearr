@@ -2,6 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
+// UMASK like the linuxserver images (e.g. 002 so a shared group can read the config folder).
+if (process.env.UMASK && /^[0-7]{3,4}$/.test(process.env.UMASK)) process.umask(parseInt(process.env.UMASK, 8));
 export const CONFIG_DIR = process.env.TASTEARR_CONFIG ?? "/config";
 fs.mkdirSync(CONFIG_DIR, { recursive: true });
 

@@ -19,6 +19,8 @@ export interface Settings {
     /** What "not into it anymore" does in Sonarr. */
     dropAction: "unmonitor" | "keep";
   };
+  /** More Sonarr instances (a separate anime or 4K Sonarr). Read for "In library" and monitoring; adds go to the main one. */
+  sonarrExtra: { name: string; url: string; apiKey: string }[];
   radarr: {
     url: string;
     apiKey: string;
@@ -40,7 +42,8 @@ export interface Settings {
   lists: { anilistUser: string; malUser: string; malClientId: string };
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
   filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
-  display: { titleLanguage: "english" | "romaji" | "native" };
+  /** services: streaming sites the user has; shown first on cards and used as the default Schedule filter. */
+  display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
   /** How the user watches: "server" (Sonarr/Plex) or "stream" (Crunchyroll etc.). Shapes the setup guide and wording. */
   mode: "server" | "stream" | "";
   /** Quiz genre answers. "never" genres are excluded outright. */
@@ -77,12 +80,13 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   sonarr: { url: "", apiKey: "", qualityProfileId: null, rootFolderPath: "", tags: [], sequelMonitor: "newSeason", searchOnAdd: true, dropAction: "unmonitor" },
+  sonarrExtra: [],
   radarr: { url: "", apiKey: "", qualityProfileId: null, rootFolderPath: "", tags: [], minimumAvailability: "released", searchOnAdd: true },
   media: { type: "none", url: "", token: "", userId: "", libraryIds: [] },
   lists: { anilistUser: "", malUser: "", malClientId: "" },
   training: { seasons: 8, minTagRank: 60, formats: ["TV", "TV_SHORT", "ONA"], countries: ["JP"] },
   filters: { excludeGenres: [], excludeTags: ["Kids"], hideInLibrary: false, hideShorts: false, noGore: false },
-  display: { titleLanguage: "english" },
+  display: { titleLanguage: "english", services: [] },
   mode: "",
   genrePrefs: {},
   notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true, airingAlerts: true, airingDelayMin: 60 },
@@ -203,6 +207,7 @@ export function publicSettings() {
   const auth = s.auth as Record<string, unknown>;
   auth.hasPassword = !!auth.passwordHash;
   delete auth.passwordHash;
+  s.sonarrExtra = (s.sonarrExtra as Settings["sonarrExtra"]).map((x) => ({ ...x, apiKey: MASK }));
   delete s.secret;
   delete s.apiKey;
   delete s.plexClientId;
@@ -231,7 +236,9 @@ export function updateSettings(patch: unknown) {
   for (const [u, k] of SECRET_FOR_URL) {
     const submitted = getPath(allowed, k);
     const keptOld = submitted === undefined || isMasked(submitted);
-    if (keptOld && getPath(next, u) !== getPath(cur, u)) setPath(next as unknown as Record<string, unknown>, k, "");
+    // Compare normalised forms, so an address stored before normalisation existed doesn't count as "changed".
+    const norm = (v: unknown) => (u === "notify.ntfyUrl" ? normaliseNtfy(String(v ?? "")) : String(v ?? "").replace(/\/+$/, ""));
+    if (keptOld && norm(getPath(next, u)) !== norm(getPath(cur, u))) setPath(next as unknown as Record<string, unknown>, k, "");
   }
   next.externalUrl = next.externalUrl.replace(/\/+$/, "");
   write(next);

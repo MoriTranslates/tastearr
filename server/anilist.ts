@@ -68,7 +68,8 @@ function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
         await new Promise((r) => setTimeout(r, s * 1000));
         continue;
       }
-      if (!res.ok) throw new Error(`AniList ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (res.status >= 500) throw new Error(`AniList is having trouble right now (HTTP ${res.status}). Try again in a few minutes.`);
+      if (!res.ok) throw new Error(`AniList refused the request (HTTP ${res.status}): ${(await res.text()).replace(/<[^>]+>/g, " ").trim().slice(0, 160)}`);
       const body = (await res.json()) as { data: T; errors?: { message: string }[] };
       if (body.errors?.length) throw new Error(`AniList: ${body.errors[0].message}`);
       return body.data;
@@ -170,17 +171,40 @@ export async function searchTitle(q: string): Promise<Media[]> {
   return d.Page.media;
 }
 
-/** Popular shows matching a filter, used for quiz archetype slots. */
-export async function searchPopular(filter: { genre_in?: string[]; tag_in?: string[]; source?: string; startBefore?: number }, perPage = 12): Promise<Media[]> {
-  const d = await gql<PageResult>(
-    `query ($genre_in: [String], $tag_in: [String], $source: MediaSource, $before: FuzzyDateInt, $perPage: Int) {
-      Page(perPage: $perPage) { pageInfo { hasNextPage }
-        media(type: ANIME, format_in: [TV, ONA], isAdult: false, countryOfOrigin: "JP", genre_in: $genre_in, tag_in: $tag_in,
-              source: $source, startDate_lesser: $before, sort: POPULARITY_DESC) { ${FIELDS} } } }`,
-    { genre_in: filter.genre_in, tag_in: filter.tag_in, source: filter.source, before: filter.startBefore, perPage },
-  );
-  store(d.Page.media, null, null);
-  return d.Page.media;
+export type PopularFilter = { genre_in?: string[]; tag_in?: string[]; source?: string };
+
+/**
+ * Several "popular shows matching X" lists in one request (aliased pages, light fields), for the quiz pool. Tags must
+ * rank at least 60% so "Food" doesn't match a show with one cooking scene. Returns ids per filter, oldest-first aware.
+ */
+export async function popularIdsBatch(filters: PopularFilter[], perPage = 20) {
+  const out: { id: number; year: number | null; firstSeason: boolean }[][] = [];
+  for (let i = 0; i < filters.length; i += 8) {
+    const chunk = filters.slice(i, i + 8);
+    const vars: Record<string, unknown> = {};
+    const decl: string[] = [];
+    const body = chunk.map((f, k) => {
+      vars[`g${k}`] = f.genre_in;
+      vars[`t${k}`] = f.tag_in;
+      vars[`s${k}`] = f.source;
+      decl.push(`$g${k}: [String], $t${k}: [String], $s${k}: MediaSource`);
+      return `p${k}: Page(perPage: ${perPage}) { media(type: ANIME, format_in: [TV, ONA], isAdult: false, countryOfOrigin: "JP", genre_in: $g${k}, tag_in: $t${k},
+        source: $s${k}, minimumTagRank: 60, sort: POPULARITY_DESC) { id startDate { year } relations { edges { relationType node { type } } } } }`;
+    });
+    const d = await gql<Record<string, { media: { id: number; startDate: { year: number | null } | null; relations: { edges: { relationType: string; node: { type: string } }[] } | null }[] }>>(
+      `query (${decl.join(", ")}) { ${body.join(" ")} }`,
+      vars,
+    );
+    for (let k = 0; k < chunk.length; k++)
+      out.push(
+        (d[`p${k}`]?.media ?? []).map((m) => ({
+          id: m.id,
+          year: m.startDate?.year ?? null,
+          firstSeason: !(m.relations?.edges ?? []).some((e) => (e.relationType === "PREQUEL" || e.relationType === "PARENT") && e.node.type === "ANIME"),
+        })),
+      );
+  }
+  return out;
 }
 
 export interface ListEntry { mediaId: number; status: string; score: number; progress: number }

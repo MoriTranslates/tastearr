@@ -5,7 +5,7 @@
 **Anime season picks that know what you actually watch.** Tastearr learns your taste from your library, your watch history and your AniList/MAL list, then ranks every show in the new season for you. Add the ones you want to Sonarr or Radarr, or follow them and get an alert when each episode is out, with a link to where it streams.
 
 - **Season picks, laid out like AniChart.** Shows are split into **Continuing**, **New**, **Shorts** and **Movies**. Each has a match score and the reason for it ("Continues Black Clover", "Isekai · Female Harem · like Hell Mode"). You can sort by match, popularity, AniList score, air time or title.
-- **Weekly schedule.** Shows are laid out Monday to Sunday in your time zone, with how many you already follow each day. **Light days** come with the best picks airing then. Filter by day ("Monday shows") or by streaming service (Crunchyroll, Netflix, HIDIVE…).
+- **Weekly schedule.** Shows are laid out Monday to Sunday in your time zone, with how many you already follow each day. **Quiet days** come with the best picks airing then. Filter by day ("Monday shows") or by streaming service, and save **your services** (Crunchyroll, Netflix, HIDIVE…) once in Settings.
 - **Sequel-aware.** A new season of something you finished goes straight to the top. A sequel to something you dropped is pushed down.
 - **Learns from everything you have:**
   - Sonarr and Radarr libraries.
@@ -14,7 +14,9 @@
   - 👍/👎 on picks, and "Not into it anymore" on airing shows.
   - A **two-minute quiz** for brand-new users.
 - **Works without the \*arrs.** No Sonarr? Press **Follow** and use Tastearr as a seasonal tracker that points you to legal streams.
-- **One-click add** to Sonarr (as an anime series; for a sequel you don't own it monitors only the new season) or to Radarr for anime movies.
+- **Add with a preview** to Sonarr (as an anime series; for a sequel you don't own it monitors only the new season) or to Radarr for anime movies. You see the profile, folder, tags and what will download before anything is written. New seasons the ID list hasn't matched yet are matched through the earlier season you own.
+- **Or let Sonarr/Radarr pull.** Prefer no write access? Point a Sonarr/Radarr **Custom List** at Tastearr's import list of your 👍 picks.
+- **Several Sonarr instances** (a separate anime or 4K Sonarr) count toward "You have this".
 - **Phone alerts** through [ntfy](https://ntfy.sh), Gotify or Discord:
   - when Sonarr/Radarr finishes a download;
   - when a followed show airs;
@@ -58,6 +60,7 @@ services:
       - /path/to/sonarr/config:/appdata/sonarr:ro
     environment:
       - TZ=Etc/UTC
+      - UMASK=022
     restart: unless-stopped
 ```
 
@@ -68,6 +71,9 @@ services:
 | `TASTEARR_APPDATA` | `/appdata` | Where "Find my apps" looks for Sonarr's `config.xml` |
 | `TRUST_PROXY` | | Your reverse proxy's IP/CIDR (e.g. `172.18.0.0/16`) or a hop count. `true` is refused because it would let anyone fake their IP. |
 | `TASTEARR_ALLOWED_HOSTS` | | Extra hostnames allowed for the local-network login bypass (see Security) |
+| `UMASK` | | Permission mask for files in `/config`, e.g. `002` |
+
+`GET /ping` answers `{"status":"OK"}` without a login, for Docker health checks and Uptime Kuma.
 
 ## Setup
 
@@ -78,9 +84,15 @@ For **phone alerts**:
 2. Paste the topic's address under Settings → Alerts.
 3. In Sonarr/Radarr, add a Webhook connection with **On Import** ticked, using the address shown in Settings.
 
+**Import lists (optional):** Settings → Security → Keys shows two addresses. In Sonarr, add an Import List of type **Custom List** with the first; in Radarr, a **Custom List** with the second. They list the shows and movies you gave 👍 or ♥.
+
+**System → Health** checks every connection like Sonarr's health page. **System → Backup** downloads the database (it contains your keys; keep it private). To restore, stop the container and put the file in `/config` as `tastearr.db`.
+
 ## Security
 
 - **An account is always required.** "Authentication required: **Disabled for local addresses**" works like it does in Sonarr. It only applies to direct connections from private IPs: anything arriving through a reverse proxy or tunnel needs a login unless `TRUST_PROXY` names that proxy. It's also ignored when the page is opened under an unknown hostname, which protects against DNS rebinding.
+- **Reverse proxies must send `X-Forwarded-For`** (Nginx Proxy Manager, SWAG, Traefik and Caddy do by default; plain nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Like Sonarr, a proxy that hides the client completely looks like a local visitor.
+- **A new install can only be claimed from your home network**, or with the one-time setup code printed in the container log.
 - **Secrets never go back to the browser.** That covers saved keys and tokens, and keys found by "Find my apps". A saved key is only re-used for the address it was saved with.
 - **State-changing requests need a custom header** (CSRF protection). Request logs never include query strings or webhook keys.
 - **Separate keys.** The admin API key (`X-Api-Key` header) is separate from the webhook key. Alert buttons use signed, expiring links.
@@ -113,11 +125,7 @@ Requires Node 22.13+ (uses the built-in `node:sqlite`).
 
 ## Roadmap
 
-- Regular TV seasons (TMDB/Trakt/TVmaze as the AniList equivalent)
-- Several Sonarr/Radarr instances (anime, 4K)
-- Overseerr/Jellyseerr request mode
-- Household profiles (Plex Home users, Jellyfin users)
-- "Still watching?" prompts and a weekly digest
+See [ROADMAP.md](ROADMAP.md) for what's next and what was considered and left out on purpose.
 
 ## License
 

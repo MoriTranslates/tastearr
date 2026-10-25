@@ -14,7 +14,7 @@ export async function dropShow(tvdbId: number) {
   const title = s?.title ?? `TVDB ${tvdbId}`;
   db.prepare("INSERT INTO dropped (tvdb_id, title, at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET at = excluded.at").run(tvdbId, title, Date.now());
   const unmonitor = !!s && getSettings().sonarr.dropAction === "unmonitor";
-  if (unmonitor) await setMonitored(s.id, false);
+  if (unmonitor) await setMonitored(s.id, false, s.instance);
   return { tvdbId, title, dropped: true, monitored: s ? !unmonitor && s.monitored : null };
 }
 
@@ -22,7 +22,7 @@ export async function undropShow(tvdbId: number) {
   db.prepare("DELETE FROM dropped WHERE tvdb_id = ?").run(tvdbId);
   const s = (await sonarrSeries()).find((x) => x.tvdbId === tvdbId);
   const remonitor = !!s && getSettings().sonarr.dropAction === "unmonitor";
-  if (remonitor) await setMonitored(s.id, true);
+  if (remonitor) await setMonitored(s.id, true, s.instance);
   return { tvdbId, dropped: false, monitored: s ? remonitor || s.monitored : null };
 }
 

@@ -45,7 +45,7 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
   async function use(f: Found) {
     try {
       await api("/discover/use", { body: { id: f.id, url: urls[f.id] } });
-      toast(`Using ${f.folder} for Sonarr`);
+      toast(`Using ${f.folder} for ${f.app === "sonarr" ? "Sonarr" : "Radarr"}`);
       onUsed();
     } catch (e) {
       toast((e as Error).message, true);
@@ -56,10 +56,10 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
     <div className="card pad stack">
       <h2>Find my apps</h2>
       <p className="muted small">
-        If Sonarr's config folder is mounted into Tastearr (read-only, at <code>/appdata</code>), Tastearr can read its API key itself. You only confirm the address.
+        If Sonarr's or Radarr's config folder is mounted into Tastearr (read-only, at <code>/appdata</code>), Tastearr can read the API key itself. You only confirm the address.
       </p>
       <button className="ghost" disabled={busy} onClick={scan}>
-        {busy ? "Looking…" : "Look for Sonarr"}
+        {busy ? "Looking…" : "Look for Sonarr and Radarr"}
       </button>
       {res && !res.appdata && <p className="muted small">No config folder is mounted, so enter the details below instead.</p>}
       {res?.appdata && !res.found.length && <p className="muted small">Nothing found in /appdata.</p>}
@@ -75,7 +75,7 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
               </button>
             </>
           ) : (
-            <span className="muted small">Enter Radarr below (auto-detect is Sonarr-only for now).</span>
+            <span className="muted small">Enter this one below.</span>
           )}
         </div>
       ))}
@@ -84,6 +84,79 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
 }
 
 // ---------------------------------------------------------------- Sonarr / Radarr
+
+/** Cards with edits that haven't been saved yet (by name). */
+export const unsaved = new Set<string>();
+
+/** More Sonarr instances (a separate anime or 4K Sonarr): used for "In library" and monitoring. Adds go to the main one. */
+export function ExtraSonarrCard({ s, onChange }: { s: Settings; onChange: () => void }) {
+  const toast = useToast();
+  const [form, setForm] = useState({ name: "", url: "", apiKey: "" });
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!s.sonarr.url) return null;
+  async function add() {
+    setBusy(true);
+    try {
+      await api("/sonarr/extra", { body: form });
+      toast(`Added ${form.name || form.url}`);
+      setForm({ name: "", url: "", apiKey: "" });
+      setOpen(false);
+      onChange();
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(i: number) {
+    await api(`/sonarr/extra/${i}`, { method: "DELETE" }).catch((e) => toast((e as Error).message, true));
+    onChange();
+  }
+  return (
+    <div className="card pad stack">
+      <h2>Other Sonarr instances</h2>
+      <p className="muted small">Running a separate anime or 4K Sonarr? Add it so shows there count as "You have this" and can be monitored. New shows are added to the main Sonarr above.</p>
+      {s.sonarrExtra.map((x, i) => (
+        <div key={x.url} className="row">
+          <strong>{x.name}</strong>
+          <span className="muted small">{x.url}</span>
+          <button className="ghost small" onClick={() => remove(i)}>
+            Remove
+          </button>
+        </div>
+      ))}
+      {open ? (
+        <div className="form">
+          <label>
+            Name
+            <input value={form.name} placeholder="Sonarr 4K" onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </label>
+          <label>
+            Address
+            <input value={form.url} placeholder="http://192.168.1.10:8990" onChange={(e) => setForm({ ...form, url: e.target.value })} />
+          </label>
+          <label>
+            API key
+            <SecretInput label="API key" value={form.apiKey} onChange={(v) => setForm({ ...form, apiKey: v })} />
+          </label>
+          <div className="row end">
+            <button className="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button className="primary" disabled={busy || !form.url || !form.apiKey} onClick={add}>
+              {busy ? "Testing…" : "Test & add"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button className="ghost" onClick={() => setOpen(true)}>
+          Add another Sonarr
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr"; s: Settings; save: Save; onSaved?: () => void }) {
   const toast = useToast();
@@ -132,6 +205,13 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
     }
   }
 
+  // Lets the setup guide warn before "Next" throws away an address or key that wasn't saved.
+  const dirty = url !== cfg.url || apiKey !== cfg.apiKey || JSON.stringify(draft) !== JSON.stringify(cfg);
+  useEffect(() => {
+    if (dirty) unsaved.add(name);
+    else unsaved.delete(name);
+    return () => void unsaved.delete(name);
+  }, [dirty, name]);
   const connected = !!cfg.url && !!cfg.apiKey;
   return (
     <div className="card pad stack">
@@ -254,10 +334,11 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [manual, setManual] = useState(false);
-  const cancelled = useRef(false);
+  // Each sign-in attempt has its own number; Cancel, a new attempt or leaving the page ends the old polling loop.
+  const attempt = useRef(0);
   useEffect(
     () => () => {
-      cancelled.current = true;
+      attempt.current++;
     },
     [],
   );
@@ -285,7 +366,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
   }
 
   async function plexSignIn() {
-    cancelled.current = false;
+    const mine = ++attempt.current;
     const popup = window.open("about:blank", "plexauth", "width=600,height=700");
     try {
       const pin = await api<{ id: number; authUrl: string }>("/plex/pin", { body: {} });
@@ -294,7 +375,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       setPlex({ pinId: pin.id, servers: null });
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        if (cancelled.current) return;
+        if (attempt.current !== mine) return;
         if (popup?.closed && i > 2) {
           // The popup closes itself after approving, so check once more before giving up.
           const last = await api<{ done: boolean }>(`/plex/pin/${pin.id}`).catch(() => ({ done: false }));
@@ -395,7 +476,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
               <button
                 className="linklike small"
                 onClick={() => {
-                  cancelled.current = true;
+                  attempt.current++;
                   setPlex(null);
                 }}
               >
@@ -595,7 +676,8 @@ export function AlertsCard({ s, save, simple }: { s: Settings; save: Save; simpl
       <div className="form">
         <label>
           ntfy topic name
-          <input value={n.ntfyUrl} placeholder={example} onChange={(e) => setN({ ...n, ntfyUrl: e.target.value })} />
+          {/* Topics are case-sensitive: phones must not capitalise or "correct" them. */}
+          <input value={n.ntfyUrl} placeholder={example} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" onChange={(e) => setN({ ...n, ntfyUrl: e.target.value })} />
         </label>
         <label className="check">
           <input type="checkbox" checked={n.airingAlerts} onChange={(e) => setN({ ...n, airingAlerts: e.target.checked })} /> When a show I follow has a new episode

@@ -112,7 +112,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
   }
 
   if (error) return <ErrorBox error={error} retry={() => setReload((x) => x + 1)} />;
-  if (!data) return <Spinner label="Picking shows for the quiz…" />;
+  if (!data) return <Spinner label="Picking shows for the quiz… the first time takes a few seconds while Tastearr asks AniList." />;
   const answered = data.shows.filter((s) => s.answer).length;
 
   return (

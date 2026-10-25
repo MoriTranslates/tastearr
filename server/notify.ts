@@ -74,7 +74,8 @@ export async function notifySeason(season: Season, year: number, force = false) 
   const n = getSettings().notify;
   if (!force && (!n.seasonAlerts || db.prepare("SELECT 1 FROM notified WHERE season = ? AND year = ?").get(season, year))) return false;
   const { picks } = await recommend(season, year);
-  const top = picks.filter((p) => !p.excluded && !p.inLibrary && !p.verdict).slice(0, n.picks);
+  // New to the user only: nothing they already have, rated, follow, watch or carry over from last season.
+  const top = picks.filter((p) => !p.excluded && !p.inLibrary && !p.verdict && !p.myStatus && !p.carryOver).slice(0, n.picks);
   if (top.length < Math.min(n.picks, 5)) return false; // season line-up not announced yet
   const ext = getSettings().externalUrl;
   const sent = await send({

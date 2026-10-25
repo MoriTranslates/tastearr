@@ -7,7 +7,7 @@
  * Prints AUC, precision@20 and R-precision per season and overall. Every taste change should be checked here.
  */
 import { getMediaByIds, getSeason, seasonOf, shiftSeason } from "./anilist.js";
-import { buildProfile, chose, context, labelOf, scoreCandidates } from "./taste.js";
+import { buildProfile, choseWithFiles, context, labelOf, scoreCandidates } from "./taste.js";
 
 const SEASONS_BACK = Number(process.argv[2] ?? 5);
 
@@ -32,10 +32,15 @@ async function main() {
     const profile = await buildProfile({ until: target, save: false, ctx });
     const list = (await getSeason(target.season, target.year)).filter((m) => !m.isAdult && m.format && ["TV", "TV_SHORT", "ONA"].includes(m.format) && m.countryOfOrigin === "JP");
     // Make sure prequels are cached so the franchise logic works as in production.
-    await getMediaByIds([...new Set(list.flatMap((m) => (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id)))]);
+    let frontier = [...new Set(list.flatMap((m) => (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL" || e.relationType === "PARENT").map((e) => e.node.id)))];
+    for (let depth = 0; depth < 3 && frontier.length; depth++) {
+      const got = await getMediaByIds(frontier);
+      frontier = [...new Set(got.flatMap((m) => (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id)))];
+    }
     const picks = scoreCandidates(list, profile, ctx, { blind: true });
     // "Kept" = chose it in Sonarr/Radarr, or a clear positive from watch history / list / ratings.
-    const truth = new Map(list.map((m) => [m.id, chose(m.id, ctx) || labelOf(m.id, ctx).p >= 1]));
+    // Sonarr auto-monitors new seasons of owned series, so "monitored" alone isn't a choice: it needs files or progress.
+    const truth = new Map(list.map((m) => [m.id, choseWithFiles(m.id, ctx) || labelOf(m.id, ctx).p >= 1.2]));
     const ranked = [...picks].sort((a, b) => b.score - a.score);
     const labels = ranked.map((p) => truth.get(p.id) ?? false);
     const pos = labels.filter(Boolean).length;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "../App";
 import { api, type Followed, type Show, type Status } from "../api";
 import { airLabel, ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
 
@@ -17,7 +18,8 @@ export function Shows({ status }: { status: Status }) {
   }, [reload]);
 
   async function toggle(s: Show) {
-    if (!s.dropped && !confirm(`Stop following ${s.title}? You won't get alerts for it${status.sonarr ? ", and Sonarr may stop downloading it (Settings decides)" : ""}. You can turn it back on later.`)) return;
+    const sonarrPart = status.prefs?.dropAction === "keep" ? " Sonarr keeps downloading it." : " Sonarr stops monitoring it (nothing is deleted).";
+    if (!s.dropped && !confirm(`Not into ${s.title} any more? Tastearr stops alerts for it and learns from this.${status.sonarr ? sonarrPart : ""} You can turn it back on later.`)) return;
     setBusy(s.tvdbId);
     try {
       const r = await api<{ dropped: boolean; monitored: boolean | null }>(`/shows/${s.tvdbId}/${s.dropped ? "undrop" : "drop"}`, { body: {} });
@@ -34,6 +36,13 @@ export function Shows({ status }: { status: Status }) {
     try {
       await api(`/picks/${f.id}/unfollow`, { body: {} });
       setData((d) => d && { ...d, following: d.following.filter((x) => x.id !== f.id) });
+      toast(`Stopped following ${f.title}`, false, {
+        label: "Undo",
+        run: () =>
+          void api(`/picks/${f.id}/follow`, { body: {} })
+            .then(() => setData((d) => d && { ...d, following: [f, ...d.following] }))
+            .catch((e) => toast((e as Error).message, true)),
+      });
     } catch (e) {
       toast((e as Error).message, true);
     }
@@ -83,7 +92,10 @@ export function Shows({ status }: { status: Status }) {
       )}
 
       <h2>Following</h2>
-      <p className="muted small">Shows you follow from Picks. You get an alert when each episode airs, with where to stream it.</p>
+      <p className="muted small">
+        Shows you follow from Picks.{" "}
+        {status.alerts ? "You get an alert when each episode airs, with where to stream it." : <>Set up alerts in <Link to="/settings">Settings</Link> to get a ping when each episode airs.</>}
+      </p>
       {!following.length && <p className="muted">{q ? "No matches." : "Not following anything yet. Press Follow on a pick."}</p>}
       <div className="show-list">
         {following.map((f) => (

@@ -62,17 +62,45 @@ async function refresh() {
     byTvdb.set(r.tvdb_id, [...(byTvdb.get(r.tvdb_id) ?? []), r.anilist_id]);
   }
   // User-confirmed matches win over the community list.
-  for (const o of db.prepare("SELECT anilist_id, tvdb_id, season FROM mapping_overrides").all() as { anilist_id: number; tvdb_id: number; season: number | null }[]) {
-    byAnilist.set(o.anilist_id, { tvdbId: o.tvdb_id, season: o.season });
-    byTvdb.set(o.tvdb_id, [...new Set([...(byTvdb.get(o.tvdb_id) ?? []), o.anilist_id])]);
-  }
+  for (const o of db.prepare("SELECT anilist_id, tvdb_id, season FROM mapping_overrides").all() as { anilist_id: number; tvdb_id: number; season: number | null }[])
+    place(o.anilist_id, { tvdbId: o.tvdb_id, season: o.season });
   loadedAt = Date.now();
 }
 
-export function saveOverride(anilistId: number, tvdbId: number, season: number | null) {
+/** Points an AniList id at a TVDB series, taking it out of the previous series' list so watch history doesn't mix. */
+function place(anilistId: number, m: Mapping) {
+  const old = byAnilist!.get(anilistId);
+  if (old && old.tvdbId !== m.tvdbId) byTvdb!.set(old.tvdbId, (byTvdb!.get(old.tvdbId) ?? []).filter((x) => x !== anilistId));
+  byAnilist!.set(anilistId, m);
+  byTvdb!.set(m.tvdbId, [...new Set([...(byTvdb!.get(m.tvdbId) ?? []), anilistId])]);
+}
+
+export async function saveOverride(anilistId: number, tvdbId: number, season: number | null) {
+  await ensure();
   db.prepare("INSERT INTO mapping_overrides (anilist_id, tvdb_id, season, at) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET tvdb_id = excluded.tvdb_id, season = excluded.season, at = excluded.at").run(anilistId, tvdbId, season, Date.now());
-  byAnilist?.set(anilistId, { tvdbId, season });
-  byTvdb?.set(tvdbId, [...new Set([...(byTvdb?.get(tvdbId) ?? []), anilistId])]);
+  inferred.delete(anilistId);
+  place(anilistId, { tvdbId, season });
+}
+
+/** Forgets every user-confirmed match (Settings -> "Reset show matches"); the community list applies again. */
+export function clearOverrides() {
+  const n = db.prepare("DELETE FROM mapping_overrides").run().changes;
+  loadedAt = 0;
+  return Number(n);
+}
+
+/**
+ * Matches guessed from an earlier season when the community list hasn't caught up (a new season of a show already
+ * in Sonarr). Kept in memory only; recomputed on every picks load.
+ */
+const inferred = new Map<number, Mapping>();
+export function setInferred(anilistId: number, m: Mapping) {
+  inferred.set(anilistId, m);
+}
+
+/** When the community list was last downloaded (System -> Health). */
+export function mappingFileAge() {
+  return fs.existsSync(FILE) ? Date.now() - fs.statSync(FILE).mtimeMs : null;
 }
 
 async function ensure() {
@@ -81,7 +109,7 @@ async function ensure() {
 
 export async function mapAnilist(id: number): Promise<Mapping | null> {
   await ensure();
-  return byAnilist!.get(id) ?? null;
+  return byAnilist!.get(id) ?? inferred.get(id) ?? null;
 }
 
 export async function anilistIdsForTvdb(tvdbId: number): Promise<number[]> {

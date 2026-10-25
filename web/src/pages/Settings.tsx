@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, store, type Settings as S, type Status } from "../api";
 import { Link } from "../App";
-import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, useSettings } from "../connections";
+import { AlertsCard, ArrCard, AutoDetect, ExtraSonarrCard, ListsCard, MediaCard, useSettings } from "../connections";
 import { ErrorBox, ListInput, NumberInput, SecretInput, usePageTitle, useToast } from "../ui";
 
 const TABS = [
@@ -15,8 +15,9 @@ type Tab = (typeof TABS)[number]["id"];
 export function Settings({ status, onSaved }: { status: Status; onSaved: () => void }) {
   usePageTitle("Settings");
   const { s, setS, save, error } = useSettings();
-  const [tab, setTab] = useState<Tab>(() => store.get("settingsTab", "connections"));
-  useEffect(() => store.set("settingsTab", tab), [tab]);
+  // Streaming-only users start on Picks & filters; server users on Connections. A tab they pick is remembered.
+  const [tab, setTabRaw] = useState<Tab>(() => store.get<Tab | null>("settingsTab", null) ?? (status.mode === "stream" ? "picks" : "connections"));
+  const setTab = (t: Tab) => (setTabRaw(t), store.set("settingsTab", t));
 
   const saveAndNotify = async (patch: Partial<S>) => {
     const r = await save(patch);
@@ -43,21 +44,44 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
         ))}
       </div>
 
-      {tab === "connections" && (
-        <>
-          <AutoDetect onUsed={() => api<S>("/settings").then(setS)} />
-          <ArrCard kind="sonarr" s={s} save={saveAndNotify} />
-          <ArrCard kind="radarr" s={s} save={saveAndNotify} />
-          <MediaCard s={s} save={saveAndNotify} />
-          <ListsCard s={s} save={saveAndNotify} />
-        </>
-      )}
+      {tab === "connections" &&
+        (status.mode === "stream" && !status.sonarr && !status.radarr && !status.media ? (
+          <>
+            <ListsCard s={s} save={saveAndNotify} />
+            <details className="card pad">
+              <summary>Media server apps (optional: Sonarr, Radarr, Plex, Jellyfin)</summary>
+              <ServerCards s={s} setS={setS} save={saveAndNotify} />
+            </details>
+          </>
+        ) : (
+          <>
+            <ServerCards s={s} setS={setS} save={saveAndNotify} />
+            <ListsCard s={s} save={saveAndNotify} />
+          </>
+        ))}
       {tab === "picks" && <PicksSettings s={s} save={saveAndNotify} />}
       {tab === "alerts" && <AlertsCard s={s} save={saveAndNotify} />}
       {tab === "security" && <Security s={s} status={status} save={saveAndNotify} />}
     </section>
   );
 }
+
+function ServerCards({ s, setS, save }: { s: S; setS: (s: S) => void; save: (p: Partial<S>) => Promise<S> }) {
+  // Cards remount after "Find my apps" fills in an address, so they show (and keep) what was detected.
+  const [gen, setGen] = useState(0);
+  return (
+    <>
+      <AutoDetect onUsed={() => api<S>("/settings").then((x) => (setS(x), setGen((g) => g + 1)))} />
+      <ArrCard key={`sonarr-${gen}`} kind="sonarr" s={s} save={save} />
+      <ExtraSonarrCard s={s} onChange={() => api<S>("/settings").then(setS)} />
+      <ArrCard key={`radarr-${gen}`} kind="radarr" s={s} save={save} />
+      <MediaCard s={s} save={save} />
+    </>
+  );
+}
+
+/** Common legal streaming sites (AniList's names), for "my services". */
+const SERVICES = ["Crunchyroll", "Netflix", "HIDIVE", "Prime Video", "Disney+", "Hulu", "Max", "Bilibili TV", "YouTube", "Muse Asia", "Ani-One Asia", "iQIYI", "Tubi", "Hoopla", "Laftel"];
 
 function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> }) {
   const toast = useToast();
@@ -69,6 +93,10 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
     setBusy(true);
     try {
       await save({ filters, training, display });
+      // New defaults should show up on Picks, so forget the filters set there earlier.
+      if (JSON.stringify(display.services) !== JSON.stringify(s.display.services)) store.set("services", null);
+      if (filters.hideInLibrary !== s.filters.hideInLibrary) store.set("showLibrary", null);
+      if (filters.hideShorts !== s.filters.hideShorts) store.set("collapsed", null);
       if (JSON.stringify(training) !== JSON.stringify(s.training)) {
         await api("/profile/rebuild", { body: {} });
         toast("Saved. Re-learning your taste (takes a minute)…");
@@ -85,12 +113,27 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
       <div className="form">
         <label>
           Titles in
-          <select value={display.titleLanguage} onChange={(e) => setDisplay({ titleLanguage: e.target.value as S["display"]["titleLanguage"] })}>
+          <select value={display.titleLanguage} onChange={(e) => setDisplay({ ...display, titleLanguage: e.target.value as S["display"]["titleLanguage"] })}>
             <option value="english">English</option>
             <option value="romaji">Romaji</option>
             <option value="native">Native (日本語)</option>
           </select>
         </label>
+        <div className="wide">
+          <span>My streaming services</span>
+          <div className="chips" role="group" aria-label="My streaming services">
+            {[...new Set([...SERVICES, ...display.services])].map((sv) => {
+              const on = display.services.includes(sv);
+              return (
+                <button key={sv} type="button" className={`chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => setDisplay({ ...display, services: on ? display.services.filter((x) => x !== sv) : [...display.services, sv] })}>
+                  {on ? "✓ " : ""}
+                  {sv}
+                </button>
+              );
+            })}
+          </div>
+          <span className="muted small">Picks and the Schedule start filtered to these. Leave empty to see everything.</span>
+        </div>
         <label>
           Never show these genres
           <ListInput label="Excluded genres" value={filters.excludeGenres} placeholder="Slice of Life, Music" onChange={(v) => setFilters({ ...filters, excludeGenres: v })} />
@@ -160,6 +203,15 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
       const r = await api<Record<string, string>>(`/settings/keys/${which}/regenerate`, { body: {} });
       setKeys((k) => (k ? { ...k, ...r } : k));
       toast(`New ${what} created`);
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  }
+  async function resetMatches() {
+    if (!confirm("Forget every show you matched to Sonarr by hand? The community list applies again.")) return;
+    try {
+      const r = await api<{ cleared: number }>("/mapping/reset", { body: {} });
+      toast(`Forgot ${r.cleared} match${r.cleared === 1 ? "" : "es"}`);
     } catch (e) {
       toast((e as Error).message, true);
     }
@@ -238,11 +290,23 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
             )}
           </label>
           <label className="wide">
-            Webhook key (only works for Sonarr/Radarr webhooks)
+            Webhook key (only works for Sonarr/Radarr webhooks and import lists)
             <code className="trunc">{keys?.webhookKey ?? s.webhookKey}</code>
           </label>
         </div>
+        <details>
+          <summary>Import lists (let Sonarr/Radarr pull your 👍 picks instead)</summary>
+          <p className="muted small">
+            In Sonarr: Settings → Import Lists → + → Custom List, and paste the first address. In Radarr: Settings → Lists → + → Custom List, and paste the second. They list
+            shows you gave 👍 or ♥ on the Picks page.
+          </p>
+          <p className="mono">{`${s.externalUrl || location.origin}/api/importlist/sonarr/${keys?.webhookKey ?? s.webhookKey}`}</p>
+          <p className="mono">{`${s.externalUrl || location.origin}/api/importlist/radarr/${keys?.webhookKey ?? s.webhookKey}`}</p>
+        </details>
         <div className="row end">
+          <button className="ghost" onClick={resetMatches}>
+            Reset show matches
+          </button>
           <button className="ghost" onClick={() => regen("webhookKey")}>
             New webhook key
           </button>

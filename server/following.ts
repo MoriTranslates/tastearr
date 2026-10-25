@@ -48,6 +48,8 @@ export async function followedShows() {
 export async function announceAired() {
   const n = getSettings().notify;
   if (!n.airingAlerts) return 0;
+  // Nowhere to send yet: don't fetch (or later dump a backlog) until an alert channel is set up.
+  if (!n.ntfyUrl && !n.discordWebhook && !(n.gotifyUrl && n.gotifyToken)) return 0;
   const ids = followedIds();
   if (!ids.length) return 0;
   // Simulcasts usually land a little after the Japanese broadcast; wait before saying "it's out".

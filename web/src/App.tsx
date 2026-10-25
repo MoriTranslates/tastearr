@@ -95,6 +95,11 @@ export function App() {
           </nav>
         </header>
         <main id="main" tabIndex={-1}>
+          {status.warnings?.map((w) => (
+            <p key={w} className="banner warn" role="alert">
+              {w}
+            </p>
+          ))}
           {page === "setup" && <Wizard status={status} onDone={refreshStatus} />}
           {page === "/" && <Picks status={status} />}
           {page === "/shows" && <Shows status={status} />}

@@ -99,15 +99,38 @@ async function scan(): Promise<{ appdata: boolean; docker: boolean; found: Found
 /** What the browser sees: no keys. */
 export async function discover() {
   const r = await scan();
-  return { ...r, found: r.found.map(({ apiKey: _k, ...f }) => ({ ...f, usable: f.app === "sonarr" })) };
+  return { ...r, found: r.found.map(({ apiKey: _k, ...f }) => ({ ...f, usable: f.app === "sonarr" || f.app === "radarr" })) };
 }
 
-/** Copies a discovered Sonarr's key into settings, with the URL the user confirmed. */
-export async function useDiscovered(id: string, url: string) {
+/** A LAN address: private IPv4, loopback, a single-label Docker/mDNS name or *.local. */
+export function isPrivateHost(host: string) {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) && /^[\d.]+$/.test(h)) return true;
+  if (h === "localhost" || h === "::1" || /^f[cd][0-9a-f]{2}:/.test(h)) return true;
+  return /^[a-z0-9-]+$/.test(h) || h.endsWith(".local");
+}
+
+/**
+ * Copies a discovered Sonarr/Radarr key into settings. The key read from disk only ever goes to the address we
+ * detected, or (for a logged-in user) to a LAN address on the app's own port, never to an arbitrary URL.
+ */
+export async function useDiscovered(id: string, url: string, loggedIn: boolean) {
   const f = (await scan()).found.find((x) => x.id === id);
   if (!f) throw new Error("That app is no longer detected");
-  if (f.app !== "sonarr") throw new Error("Only Sonarr is supported so far");
-  if (!/^https?:\/\//i.test(url)) throw new Error("URL must start with http:// or https://");
-  patchSettings((s) => ({ ...s, sonarr: { ...s.sonarr, url: url.replace(/\/+$/, ""), apiKey: f.apiKey } }));
-  return { ok: true };
+  if (f.app !== "sonarr" && f.app !== "radarr") throw new Error("Only Sonarr and Radarr can be connected this way");
+  const clean = url.trim().replace(/\/+$/, "");
+  let u: URL;
+  try {
+    u = new URL(clean);
+  } catch {
+    throw new Error("That isn't a valid address");
+  }
+  if (!/^https?:$/.test(u.protocol)) throw new Error("URL must start with http:// or https://");
+  const detected = f.url?.replace(/\/+$/, "") === clean;
+  if (!detected) {
+    if (!loggedIn) throw new Error("Log in with your password to use a different address, or paste the API key yourself");
+    if (!isPrivateHost(u.hostname)) throw new Error("The detected key is only sent to an address on your home network. For anything else, paste the API key yourself.");
+  }
+  patchSettings((s) => ({ ...s, [f.app]: { ...s[f.app as "sonarr" | "radarr"], url: clean, apiKey: f.apiKey } }));
+  return { ok: true, app: f.app };
 }

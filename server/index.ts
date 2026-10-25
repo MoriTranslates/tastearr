@@ -5,19 +5,19 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { getMediaByIds, searchTitle, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
-import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, loginAllowed, loginSucceeded, makeSession, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
-import { listJobs, setJob } from "./db.js";
+import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, loginAllowed, loginSucceeded, makeSession, PROXY_TRUSTED, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
+import { CONFIG_DIR, db, listJobs, setJob } from "./db.js";
 import { discover, useDiscovered } from "./discover.js";
 import { announceAired, follow, followedIds, followedShows, unfollow } from "./following.js";
 import { refreshLists } from "./lists.js";
-import { mapAnilist, mappingTables, saveOverride } from "./mapping.js";
+import { clearOverrides, mapAnilist, mappingFileAge, mappingTables, saveOverride } from "./mapping.js";
 import { listJellyfinUsers, listLibraries, plexCheckPin, plexCreatePin, plexServers, testMediaServer } from "./mediaserver.js";
 import { notifySeason, send } from "./notify.js";
-import { getQuiz } from "./quiz.js";
+import { getQuiz, prewarmQuiz } from "./quiz.js";
 import { addMovie, radarrOptions, testRadarr } from "./radarr.js";
 import { checkPassword, getSettings, isMasked, patchSettings, publicSettings, regenerateKey, safeEqual, setAccount, setBypassLocal, setGenrePrefs, updateSettings, type Settings } from "./settings.js";
 import { dropShow, handleRadarrWebhook, handleSonarrWebhook, myShows, undropShow } from "./shows.js";
-import { addSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrOptions, testSonarr, type MonitorChoice } from "./sonarr.js";
+import { addSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrOptions, sonarrSeries, testSonarr } from "./sonarr.js";
 import { getProfile, invalidateContext, isBuilding, rebuildProfile, recommend, setFeedback, storedProfile, title } from "./taste.js";
 
 function findPackageJson() {
@@ -33,7 +33,7 @@ const PORT = Number(process.env.PORT ?? 8383);
 const STARTED = Date.now();
 
 /** Request URLs in logs without query strings or webhook keys. */
-const redact = (url: string) => url.split("?")[0].replace(/(\/api\/webhook\/\w+\/)[^/]+/, "$1***");
+const redact = (url: string) => url.split("?")[0].replace(/(\/api\/(?:webhook|importlist)\/\w+\/)[^/]+/, "$1***");
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? "info", serializers: { req: (r) => ({ method: r.method, url: redact(r.url), remoteAddress: r.ip }) } },
@@ -61,6 +61,25 @@ const id = (v: string) => {
   if (!Number.isInteger(n) || n <= 0) throw fail("Bad id");
   return n;
 };
+
+const monitorChoice = (v: unknown) => (["season", "all", "future", "none"] as const).find((x) => x === v);
+
+/** The TVDB season for a show matched by hand: one past its earlier season's, when that earlier season maps to the same series. */
+async function guessSeason(m: { relations?: { edges: { relationType: string; node: { id: number } }[] } | null }, tvdbId: number) {
+  for (const e of m.relations?.edges ?? []) {
+    if (e.relationType !== "PREQUEL") continue;
+    const pm = await mapAnilist(e.node.id);
+    if (pm?.tvdbId === tvdbId && pm.season) return pm.season + 1;
+  }
+  return null;
+}
+
+/** Long-runners that TVDB files as one big "season 1" (several AniList entries map there): never grab it all. */
+async function firstOfMany(map: { tvdbId: number; season: number | null }) {
+  if (map.season !== 1) return false;
+  const t = await mappingTables();
+  return (t.byTvdb.get(map.tvdbId) ?? []).filter((x) => t.byAnilist.get(x)?.season === 1).length > 1;
+}
 
 /** A stored secret is only re-used for the URL it was saved with, so it can't be sent somewhere new. */
 function withSecret(url: unknown, secret: unknown, storedUrl: string, storedSecret: string) {
@@ -90,6 +109,9 @@ function sessionCookie(req: FastifyRequest, reply: FastifyReply, username: strin
 
 // ---------------------------------------------------------------- status & account
 
+/** Docker HEALTHCHECK / Uptime Kuma: no login, no data. */
+app.get("/ping", async () => ({ status: "OK" }));
+
 app.get("/api/status", { config: { setup: true } }, async (req) => {
   const s = getSettings();
   const a = authState(req);
@@ -107,10 +129,22 @@ app.get("/api/status", { config: { setup: true } }, async (req) => {
     mode: s.mode,
     profileBuiltAt: storedProfile()?.builtAt ?? null,
     building: isBuilding(),
-    prefs: { hideInLibrary: s.filters.hideInLibrary, hideShorts: s.filters.hideShorts },
+    prefs: { hideInLibrary: s.filters.hideInLibrary, hideShorts: s.filters.hideShorts, services: s.display.services, dropAction: s.sonarr.dropAction },
+    warnings: warnings(),
     season: seasonOf(),
   };
 });
+
+/** Problems worth a banner (also listed under System -> Health). */
+let legacyWebhookAt = 0;
+let proxySeen = false;
+const webhookSeen: Record<string, number> = {};
+function warnings() {
+  const out: string[] = [];
+  if (legacyWebhookAt) out.push("Sonarr is still using the old webhook address, which has a key in the URL. Copy the new one from Settings → Alerts into Sonarr's Connect → Webhook.");
+  if (proxySeen) out.push("Logins are coming through a reverse proxy. Set the TRUST_PROXY variable to your proxy's address so login protection sees real client addresses.");
+  return out;
+}
 
 let settingUp = false;
 app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; setupToken?: string } }>("/api/auth/setup", { config: { setup: true } }, async (req, reply) => {
@@ -135,7 +169,8 @@ app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; 
 
 app.post<{ Body: { username?: string; password?: string } }>("/api/auth/login", { config: { setup: true } }, async (req, reply) => {
   if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
-  if (!loginAllowed(req.ip, String(req.body?.username ?? ""))) throw fail("Too many attempts, wait a minute and try again", 429);
+  if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"])) proxySeen = true;
+  if (!loginAllowed(req.ip, String(req.body?.username ?? ""))) throw fail("Too many attempts, wait a few seconds and try again", 429);
   const a = getSettings().auth;
   const okUser = safeEqual(String(req.body?.username ?? ""), a.username);
   const okPass = await checkPassword(String(req.body?.password ?? ""), a.passwordHash || "00:00");
@@ -189,9 +224,30 @@ app.post<{ Params: { which: string } }>("/api/settings/keys/:which/regenerate", 
   return { [req.params.which]: regenerateKey(req.params.which) };
 });
 
+// Extra Sonarr instances (read for "In library" and monitoring). Added here so their keys never round-trip the browser.
+app.post<{ Body: { name?: string; url?: string; apiKey?: string } }>("/api/sonarr/extra", async (req) => {
+  const s = getSettings();
+  if (s.sonarrExtra.length >= 4) throw fail("Up to four extra Sonarr instances");
+  const url = checkOutbound(String(req.body?.url ?? "").trim().replace(/\/+$/, ""));
+  const apiKey = String(req.body?.apiKey ?? "").trim();
+  if (!apiKey || isMasked(apiKey)) throw fail("Paste that Sonarr's API key");
+  if (url === s.sonarr.url || s.sonarrExtra.some((x) => x.url === url)) throw fail("That Sonarr is already connected");
+  const v = await testSonarr({ url, apiKey });
+  const name = String(req.body?.name ?? "").trim().slice(0, 40) || new URL(url).host;
+  patchSettings((x) => ({ ...x, sonarrExtra: [...x.sonarrExtra, { name, url, apiKey }] }));
+  invalidateContext();
+  return { ok: true, version: v.version };
+});
+app.delete<{ Params: { i: string } }>("/api/sonarr/extra/:i", async (req) => {
+  const i = Number(req.params.i);
+  patchSettings((x) => ({ ...x, sonarrExtra: x.sonarrExtra.filter((_, k) => k !== i) }));
+  invalidateContext();
+  return { ok: true };
+});
+
 app.get("/api/discover", async () => discover());
 app.post<{ Body: { id: string; url: string } }>("/api/discover/use", async (req) => {
-  const r = await useDiscovered(String(req.body?.id ?? ""), String(req.body?.url ?? ""));
+  const r = await useDiscovered(String(req.body?.id ?? ""), String(req.body?.url ?? ""), authState(req).via === "session");
   invalidateContext();
   return r;
 });
@@ -277,9 +333,59 @@ app.get("/api/profile", async () => {
 });
 app.post("/api/profile/rebuild", async () => {
   void rebuildProfile().catch(() => undefined);
-  return { started: true };
+  // The build that's running now (it may have started earlier, e.g. right after a list import): the UI follows this one.
+  return { started: true, startedAt: listJobs().find((j) => j.name === "profile")?.startedAt ?? Date.now() };
 });
 app.get("/api/system", async () => ({ version: VERSION, uptime: Date.now() - STARTED, node: process.version, jobs: listJobs() }));
+
+/** Like Sonarr's System -> Status -> Health: each connection and background job, with a plain-language fix. */
+app.get("/api/system/health", async () => {
+  const s = getSettings();
+  const checks: { name: string; ok: boolean; detail: string }[] = [];
+  const probe = async (name: string, on: boolean, fn: () => Promise<unknown>, fix: string) => {
+    if (!on) return;
+    try {
+      await fn();
+      checks.push({ name, ok: true, detail: "Connected" });
+    } catch (e) {
+      checks.push({ name, ok: false, detail: `${(e as Error).message}. ${fix}` });
+    }
+  };
+  await Promise.all([
+    probe("Sonarr", !!(s.sonarr.url && s.sonarr.apiKey), () => testSonarr(s.sonarr), "Check the address and API key in Settings → Connections."),
+    ...s.sonarrExtra.map((x) => probe(`Sonarr (${x.name})`, true, () => testSonarr(x), "Check it in Settings → Connections.")),
+    probe("Radarr", !!(s.radarr.url && s.radarr.apiKey), () => testRadarr(s.radarr), "Check the address and API key in Settings → Connections."),
+    probe(s.media.type === "plex" ? "Plex" : "Jellyfin", s.media.type !== "none" && !!s.media.url, () => testMediaServer(s.media), "Sign in again in Settings → Connections."),
+  ]);
+  const age = mappingFileAge();
+  const fresh = age !== null && age < 14 * 86_400_000;
+  checks.push({
+    name: "Anime ID list",
+    ok: fresh,
+    detail: age === null ? "Not downloaded yet; it's fetched from GitHub on the first picks load." : fresh ? `Updated ${Math.round(age / 86_400_000)} days ago` : "Couldn't refresh from GitHub for over two weeks; new shows may lack Sonarr matches.",
+  });
+  for (const j of listJobs()) if (j.state === "error") checks.push({ name: `Background job: ${j.name}`, ok: false, detail: String(j.detail ?? "") });
+  for (const w of warnings()) checks.push({ name: "Setup", ok: false, detail: w });
+  return { checks, webhooks: webhookSeen };
+});
+
+/** A copy of the database (settings, keys, taste data). Needs a password session: it contains every secret. */
+app.get("/api/system/backup", async (req, reply) => {
+  if (authState(req).via !== "session") throw fail("Log in with your password to download a backup", 403);
+  const tmp = path.join(CONFIG_DIR, `backup-${Date.now()}.db`);
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  const data = fs.readFileSync(tmp);
+  fs.rmSync(tmp, { force: true });
+  const stamp = new Date().toISOString().slice(0, 10);
+  return reply.header("Content-Type", "application/octet-stream").header("Content-Disposition", `attachment; filename="tastearr-backup-${stamp}.db"`).send(data);
+});
+
+/** Forgets matches picked by hand; the community list applies again. */
+app.post("/api/mapping/reset", async () => {
+  const n = clearOverrides();
+  invalidateContext();
+  return { cleared: n };
+});
 
 // ---------------------------------------------------------------- picks
 
@@ -291,7 +397,7 @@ app.get<{ Querystring: Record<string, string | undefined> }>("/api/picks", async
 });
 
 /** What "Add" will do, shown in the confirm dialog before anything is written to Sonarr/Radarr. */
-app.get<{ Params: { id: string } }>("/api/picks/:id/plan", async (req) => {
+app.get<{ Params: { id: string }; Querystring: { tvdbId?: string; season?: string } }>("/api/picks/:id/plan", async (req) => {
   const anilistId = id(req.params.id);
   const [m] = await getMediaByIds([anilistId]);
   if (!m) throw fail("Unknown show", 404);
@@ -303,19 +409,26 @@ app.get<{ Params: { id: string } }>("/api/picks/:id/plan", async (req) => {
     const r = getSettings().radarr;
     return { app: "radarr", title: m.title.english || m.title.romaji, rootFolder: r.rootFolderPath, search: r.searchOnAdd, minimumAvailability: r.minimumAvailability };
   }
+  // A candidate picked from Sonarr's title search: preview it with the season guessed from its earlier season.
+  if (req.query.tvdbId) {
+    const tvdbId = id(req.query.tvdbId);
+    const season = req.query.season ? id(req.query.season) : await guessSeason(m, tvdbId);
+    const owned = (await sonarrSeries()).some((x) => x.tvdbId === tvdbId);
+    return { app: "sonarr", ...(await planAdd(tvdbId, season)), alreadyInLibrary: owned, resumesSeries: (await seriesMonitored(tvdbId)) === false };
+  }
   const map = await mapAnilist(anilistId);
   if (!map) return { app: "sonarr", needsMatch: true };
-  return { app: "sonarr", ...(await planAdd(map.tvdbId, map.season)), resumesSeries: (await seriesMonitored(map.tvdbId)) === false };
+  return { app: "sonarr", ...(await planAdd(map.tvdbId, map.season, await firstOfMany(map))), resumesSeries: (await seriesMonitored(map.tvdbId)) === false };
 });
 
 /** Sonarr title-search candidates when the community mapping has no TVDB match yet. */
 app.get<{ Params: { id: string } }>("/api/picks/:id/candidates", async (req) => {
   const [m] = await getMediaByIds([id(req.params.id)]);
   if (!m) throw fail("Unknown show", 404);
-  return lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""]);
+  return lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
 });
 
-app.post<{ Params: { id: string }; Body: { monitor?: MonitorChoice; search?: boolean; tvdbId?: number; season?: number | null } }>("/api/picks/:id/add", async (req) => {
+app.post<{ Params: { id: string }; Body: { monitor?: string; search?: boolean; tvdbId?: number; season?: number | null } }>("/api/picks/:id/add", async (req) => {
   const anilistId = id(req.params.id);
   const [m] = await getMediaByIds([anilistId]);
   if (!m) throw fail("Unknown show", 404);
@@ -323,26 +436,35 @@ app.post<{ Params: { id: string }; Body: { monitor?: MonitorChoice; search?: boo
   if (m.format === "MOVIE") {
     const t = await mappingTables();
     r = await addMovie({ tmdbId: t.movieByAnilist.get(anilistId), imdbId: t.imdbByAnilist.get(anilistId) });
+  } else if (req.body?.tvdbId) {
+    // A match picked from Sonarr's title search. Only results of that search are accepted, and the match is
+    // remembered only once Sonarr took it, so a failed add can't leave a wrong match behind.
+    const tvdbId = id(String(req.body.tvdbId));
+    const cands = await lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
+    if (!cands.some((c) => c.tvdbId === tvdbId)) throw fail("That isn't one of Sonarr's matches for this show", 422);
+    const season = req.body.season ? Number(req.body.season) || null : await guessSeason(m, tvdbId);
+    const owned = (await sonarrSeries(true)).some((x) => x.tvdbId === tvdbId);
+    if (owned) r = season ? await monitorSeason(tvdbId, season) : { title: cands.find((c) => c.tvdbId === tvdbId)!.title, alreadyInLibrary: true };
+    else r = await addSeries(tvdbId, season, { monitor: monitorChoice(req.body.monitor), search: typeof req.body.search === "boolean" ? req.body.search : undefined });
+    await saveOverride(anilistId, tvdbId, season);
   } else {
-    // A user-confirmed match (from the candidates picker) is remembered for next time.
-    if (req.body?.tvdbId) {
-      const season = req.body.season === null || req.body.season === undefined ? null : Number(req.body.season) || null;
-      saveOverride(anilistId, id(String(req.body.tvdbId)), season);
-    }
     const map = await mapAnilist(anilistId);
     if (!map) throw fail("Pick the matching show first", 422);
-    const monitor = (["season", "all", "future", "none"] as const).find((x) => x === req.body?.monitor);
-    r = await addSeries(map.tvdbId, map.season, { monitor, search: typeof req.body?.search === "boolean" ? req.body.search : undefined });
+    const owned = (await sonarrSeries()).some((x) => x.tvdbId === map.tvdbId);
+    if (owned) {
+      if (!map.season) throw fail("This show is already in Sonarr", 409);
+      r = await monitorSeason(map.tvdbId, map.season);
+    } else r = await addSeries(map.tvdbId, map.season, { monitor: monitorChoice(req.body?.monitor), search: typeof req.body?.search === "boolean" ? req.body.search : undefined, firstOfMany: await firstOfMany(map) });
   }
   setFeedback(anilistId, "added");
   invalidateContext();
   return r;
 });
-app.post<{ Params: { id: string } }>("/api/picks/:id/monitor", async (req) => {
+app.post<{ Params: { id: string }; Body: { search?: boolean } }>("/api/picks/:id/monitor", async (req) => {
   const anilistId = id(req.params.id);
   const map = await mapAnilist(anilistId);
   if (!map?.season) throw fail("Unknown season number for this entry", 422);
-  const r = await monitorSeason(map.tvdbId, map.season);
+  const r = await monitorSeason(map.tvdbId, map.season, typeof req.body?.search === "boolean" ? req.body.search : undefined);
   setFeedback(anilistId, "added");
   invalidateContext();
   return r;
@@ -401,19 +523,41 @@ app.post<{ Params: { tvdbId: string } }>("/api/shows/:tvdbId/undrop", async (req
 
 // ---------------------------------------------------------------- incoming (own credentials)
 
-// v0.1 webhook address (?apikey=<admin key>). Still accepted so upgrades don't silently lose alerts; logs a warning.
+// v0.1 webhook address (?apikey=<key>). Still works so upgrades don't silently lose alerts, but it leaves a key in
+// Sonarr's logs, so the app shows a warning until Sonarr is pointed at the new address.
 app.post<{ Querystring: { apikey?: string } }>("/api/webhook/sonarr", { config: { public: true } }, async (req) => {
-  if (!safeEqual(req.query.apikey, getSettings().apiKey)) throw fail("Bad webhook key", 401);
+  const s = getSettings();
+  if (!safeEqual(req.query.apikey, s.apiKey) && !safeEqual(req.query.apikey, s.webhookKey)) throw fail("Bad webhook key", 401);
+  legacyWebhookAt = Date.now();
   app.log.warn("Sonarr is using the old v0.1 webhook address. Update it to the one shown in Settings → Alerts.");
   return { sent: await handleSonarrWebhook(req.body as Parameters<typeof handleSonarrWebhook>[0]) };
 });
 app.post<{ Params: { key: string } }>("/api/webhook/sonarr/:key", { config: { public: true } }, async (req) => {
   if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad webhook key", 401);
+  webhookSeen.sonarr = Date.now();
+  legacyWebhookAt = 0;
   return { sent: await handleSonarrWebhook(req.body as Parameters<typeof handleSonarrWebhook>[0]) };
 });
 app.post<{ Params: { key: string } }>("/api/webhook/radarr/:key", { config: { public: true } }, async (req) => {
   if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad webhook key", 401);
+  webhookSeen.radarr = Date.now();
   return { sent: await handleRadarrWebhook(req.body as Parameters<typeof handleRadarrWebhook>[0]) };
+});
+
+/**
+ * Import lists, for people who'd rather Sonarr/Radarr pull picks than let Tastearr write to them. Sonarr's "Custom
+ * List" reads [{ tvdbId }]; Radarr's "Custom List" reads [{ id }] (TMDB). Lists shows given 👍 or ♥ on the Picks page.
+ */
+const wanted = () => (db.prepare("SELECT anilist_id FROM feedback WHERE verdict IN ('liked', 'loved')").all() as { anilist_id: number }[]).map((r) => r.anilist_id);
+app.get<{ Params: { key: string } }>("/api/importlist/sonarr/:key", { config: { public: true } }, async (req) => {
+  if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad key", 401);
+  const t = await mappingTables();
+  return [...new Set(wanted().map((a) => t.byAnilist.get(a)?.tvdbId).filter((x): x is number => !!x))].map((tvdbId) => ({ tvdbId }));
+});
+app.get<{ Params: { key: string } }>("/api/importlist/radarr/:key", { config: { public: true } }, async (req) => {
+  if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad key", 401);
+  const t = await mappingTables();
+  return [...new Set(wanted().map((a) => t.movieByAnilist.get(a)).filter((x): x is number => !!x))].map((id) => ({ id }));
 });
 app.post<{ Params: { tvdbId: string }; Querystring: { exp?: string; sig?: string } }>("/api/actions/drop/:tvdbId", { config: { public: true } }, async (req) => {
   const tvdbId = id(req.params.tvdbId);
@@ -449,9 +593,11 @@ async function tick() {
   }
 }
 setTimeout(tick, 15_000);
+// A new install with nothing connected will start with the quiz: have it ready.
+if (!getSettings().sonarr.url && !getSettings().lists.anilistUser && Object.keys(getSettings().genrePrefs).length === 0) setTimeout(prewarmQuiz, 3_000);
 setInterval(tick, 6 * 3_600_000);
 setInterval(() => void announceAired().catch((e) => app.log.warn(`Airing alerts failed: ${(e as Error).message}`)), 30 * 60_000);
 
 await app.listen({ host: "0.0.0.0", port: PORT });
 if (!getSettings().auth.passwordHash)
-  app.log.info(`No account yet. Open Tastearr from your home network to create one, or use setup code ${SETUP_TOKEN} from elsewhere.`);
+  app.log.warn(`No account yet. Open Tastearr from your home network to create one, or use setup code ${SETUP_TOKEN} from elsewhere (one-time, changes on restart, safe to redact from shared logs).`);

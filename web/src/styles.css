@@ -251,4 +251,18 @@ input.search { max-width: 260px; }
   .show-row > button { grid-column: 1 / -1; }
   .found { grid-template-columns: 1fr; }
   .toasts { bottom: calc(72px + env(safe-area-inset-bottom)); }
+  /* Thumb-sized targets everywhere on phones. */
+  .chip, button, .button, select { min-height: 44px; }
+  .linklike { min-height: 44px; }
+  .toast button, .toast button.icon { min-height: 44px; min-width: 44px; }
+  .tabs { flex-wrap: wrap; }
+  .view-label { display: none; }
 }
+.toast button.primary { padding: 6px 16px; }
+.banner.warn { border-color: var(--warn, #d9a400); }
+.more-low { margin: 8px 0 0; }
+.cand.best { border-color: var(--accent-2); }
+.health li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 0.85em; word-break: break-all; }
+.seg button.on { font-weight: 600; }
+.seg button.on::before { content: "✓ "; }

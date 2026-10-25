@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Job, type Status } from "../api";
 import { Link, navigate } from "../App";
-import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, useSettings } from "../connections";
+import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, unsaved, useSettings } from "../connections";
 import { usePageTitle } from "../ui";
 
 type Mode = "server" | "stream";
@@ -16,6 +16,7 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
   const { s, setS, save, error } = useSettings();
   const [mode, setMode] = useState<Mode | null>(status.mode ? (status.mode as Mode) : null);
   const [step, setStep] = useState(0);
+  const [gen, setGen] = useState(0);
 
   const choose = async (m: Mode) => {
     setMode(m);
@@ -73,9 +74,9 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
       {name === "Download apps" && (
         <>
           <p className="muted small">Connect Sonarr (shows) and Radarr (movies) if you use them. Skip either one with Next.</p>
-          <AutoDetect onUsed={() => api("/settings").then((x) => setS(x as never))} />
-          <ArrCard kind="sonarr" s={s} save={saveAndRefresh} />
-          <ArrCard kind="radarr" s={s} save={saveAndRefresh} />
+          <AutoDetect onUsed={() => api("/settings").then((x) => (setS(x as never), setGen((g) => g + 1), onDone()))} />
+          <ArrCard key={`sonarr-${gen}`} kind="sonarr" s={s} save={saveAndRefresh} />
+          <ArrCard key={`radarr-${gen}`} kind="radarr" s={s} save={saveAndRefresh} />
         </>
       )}
       {name === "Watch history" && <MediaCard s={s} save={saveAndRefresh} />}
@@ -104,7 +105,13 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
           Back
         </button>
         {!last && (
-          <button className="primary" onClick={() => setStep(step + 1)}>
+          <button
+            className="primary"
+            onClick={() => {
+              if (unsaved.size && !confirm(`${[...unsaved].join(" and ")} has changes you haven't saved. Continue without saving them?`)) return;
+              setStep(step + 1);
+            }}
+          >
             Next
           </button>
         )}
@@ -147,8 +154,11 @@ function Build({ status, onDone }: { status: Status; onDone: () => void }) {
         if (alive) setError((e as Error).message);
       }
     };
-    api("/profile/rebuild", { body: {} })
-      .then(() => (timer = setTimeout(poll, 800)))
+    api<{ startedAt?: number }>("/profile/rebuild", { body: {} })
+      .then((r) => {
+        if (r.startedAt) started.current = Number(r.startedAt) + 2000;
+        timer = setTimeout(poll, 800);
+      })
       .catch((e) => alive && setError((e as Error).message));
     return () => {
       alive = false;

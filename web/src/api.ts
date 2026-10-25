@@ -45,7 +45,8 @@ export interface Status {
   quizAnswers?: number;
   profileBuiltAt?: number | null;
   building?: boolean;
-  prefs?: { hideInLibrary: boolean; hideShorts: boolean };
+  prefs?: { hideInLibrary: boolean; hideShorts: boolean; services: string[]; dropAction: "unmonitor" | "keep" };
+  warnings?: string[];
   alerts?: boolean;
   mode?: "server" | "stream" | "";
   season?: { season: Season; year: number };
@@ -79,6 +80,8 @@ export interface Pick {
   lowConfidence: boolean;
   continues: { title: string; watched: boolean; kept: boolean; behind: number } | null;
   spinOffOf: string | null;
+  compilationOf: { title: string; seen: boolean } | null;
+  matchGuessed: boolean;
   myStatus: "watching" | "seen" | "planning" | "following" | "dropped" | null;
   needsMatch: boolean;
   reasons: { label: string; lift: number }[];
@@ -143,7 +146,8 @@ export interface Settings {
   lists: { anilistUser: string; malUser: string; malClientId: string };
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
   filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
-  display: { titleLanguage: "english" | "romaji" | "native" };
+  display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
+  sonarrExtra: { name: string; url: string; apiKey: string }[];
   mode: "server" | "stream" | "";
   genrePrefs: Record<string, Pref>;
   notify: { discordWebhook: string; ntfyUrl: string; ntfyToken: string; gotifyUrl: string; gotifyToken: string; picks: number; seasonAlerts: boolean; episodeAlerts: boolean; airingAlerts: boolean; airingDelayMin: number };
@@ -167,10 +171,12 @@ export interface AddPlan {
   tags?: string[];
   options?: { value: "season" | "all" | "future" | "none"; label: string }[];
   resumesSeries?: boolean;
+  alreadyInLibrary?: boolean;
+  seasons?: number[];
   minimumAvailability?: string;
 }
 
-export interface Candidate { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null }
+export interface Candidate { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean }
 
 export interface ArrOptions { profiles: { id: number; name: string }[]; roots: { id: number; path: string }[]; tags: { id: number; label: string }[] }
 

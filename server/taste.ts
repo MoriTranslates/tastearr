@@ -1,7 +1,7 @@
 import { db, droppedSet, setJob } from "./db.js";
 import { cachedMedia, getMediaByIds, getSeason, seasonOf, shiftSeason, SEASONS, type Media, type Season } from "./anilist.js";
 import { listEntries, refreshLists } from "./lists.js";
-import { mappingTables, type Mapping } from "./mapping.js";
+import { mappingTables, setInferred, type Mapping } from "./mapping.js";
 import { watchStates, type WatchState } from "./mediaserver.js";
 import { radarrConfigured, radarrMovies, type RadarrMovie } from "./radarr.js";
 import { getSettings } from "./settings.js";
@@ -48,7 +48,14 @@ export const QUIET_TAGS = new Set([
   "Male Protagonist", "Female Protagonist", "Heterosexual", "Shounen", "Seinen", "Shoujo", "Josei", "Primarily Adult Cast",
   "Primarily Teen Cast", "Primarily Male Cast", "Primarily Female Cast", "Ensemble Cast", "Coming of Age", "Episodic",
   "Primarily Child Cast", "Primarily Animal Cast", "Full CGI", "Chibi", "Kemonomimi", "Kuudere", "Tsundere", "Nudity", "Gore",
+  // Real signal, but "you usually skip disability" reads badly as an explanation.
+  "Disability", "LGBTQ+ Themes", "Mental Illness", "Suicide", "Bullying", "Slavery", "Assassins", "Curses",
 ]);
+/** Plain names for AniList tags that read oddly on a card (the quiz uses the same words). */
+const TAG_LABEL: Record<string, string> = {
+  "Female Harem": "Harem", "Male Harem": "Reverse harem", "Cute Girls Doing Cute Things": "Cute & cozy", Iyashikei: "Relaxing",
+  "Video Games": "Video-game world", "Urban Fantasy": "Modern-day fantasy", "Super Power": "Superpowers", Swordplay: "Sword fights",
+};
 export const GORE_TAGS = ["Gore", "Body Horror", "Torture", "Cannibalism"];
 const CANDIDATE_FORMATS = new Set(["TV", "TV_SHORT", "ONA", "MOVIE"]);
 const EPISODIC_FORMATS = new Set(["TV", "TV_SHORT", "ONA"]);
@@ -68,7 +75,8 @@ export function features(m: Media, minRank = getSettings().training.minTagRank):
   return out;
 }
 
-export const label = (f: string) => (f.startsWith("S:") ? `${SOURCE_LABEL[f.slice(2)] ?? f.slice(2).replace(/_/g, " ").toLowerCase()} adaptation` : f.slice(2));
+export const label = (f: string) =>
+  f.startsWith("S:") ? `${SOURCE_LABEL[f.slice(2)] ?? f.slice(2).replace(/_/g, " ").toLowerCase()} adaptation` : (TAG_LABEL[f.slice(2)] ?? f.slice(2));
 
 export function title(m: Media) {
   const lang = getSettings().display.titleLanguage;
@@ -81,7 +89,9 @@ function eligible(m: Media) {
   return !m.isAdult && (!m.format || t.formats.includes(m.format)) && (!m.countryOfOrigin || t.countries.includes(m.countryOfOrigin));
 }
 
-const isShort = (m: Media) => m.format === "TV_SHORT" || (m.format !== "MOVIE" && m.duration !== null && m.duration > 0 && m.duration <= 15);
+// 12-minute half-length series are real shows (and often ecchi/comedy favourites) even when AniList files them as
+// TV_SHORT; only true minis are "shorts". Episode length decides when it's known, the format otherwise.
+const isShort = (m: Media) => m.format !== "MOVIE" && (m.duration ? m.duration <= 9 : m.format === "TV_SHORT");
 
 // ---------------------------------------------------------------- what we know about the user
 
@@ -199,6 +209,18 @@ export function chose(id: number, ctx: Ctx) {
   }
   const tmdb = ctx.movieByAnilist.get(id);
   return !!(tmdb && ctx.movies.has(tmdb));
+}
+
+/** Like chose(), but only when the season has files: Sonarr auto-monitors new seasons of owned series. */
+export function choseWithFiles(id: number, ctx: Ctx) {
+  const map = ctx.byAnilist.get(id);
+  const s = map ? ctx.lib.get(map.tvdbId) : undefined;
+  if (s) {
+    const seasons = map!.season !== null ? s.seasons.filter((x) => x.seasonNumber === map!.season) : s.seasons.filter((x) => x.seasonNumber > 0);
+    if (seasons.some((x) => (x.statistics?.episodeFileCount ?? 0) > 0)) return true;
+  }
+  const tmdb = ctx.movieByAnilist.get(id);
+  return !!(tmdb && ctx.movies.get(tmdb)?.hasFile);
 }
 
 /** What we know about the user and one AniList entry, at TVDB-season level where possible. */
@@ -360,7 +382,8 @@ export async function buildProfile(opts: { until?: { season: Season; year: numbe
     const unknownWeight = ctx.hasHistory ? 1 : 0.08;
     const rows = [...items.values()].map((m) => {
       const l = labelOf(m.id, ctx);
-      const w = (l.known ? 1 : unknownWeight) / fr.size(m.id);
+      const ago = m.season && m.seasonYear ? Math.max(0, seasonIdx(end) - seasonIdx({ season: m.season, year: m.seasonYear }) - 1) : s.training.seasons;
+      const w = ((l.known ? 1 : unknownWeight) / fr.size(m.id)) * Math.max(0.3, (TUNE.decay ?? 0.9) ** ago);
       return { m, l, w };
     });
     const sumN = rows.reduce((a, r) => a + r.l.n * r.w, 0);
@@ -481,6 +504,7 @@ export interface Pick {
   /** Direct sequel: the previous season, whether the user watched/kept it, and how many seasons they're behind. */
   continues: { title: string; watched: boolean; kept: boolean; behind: number } | null;
   spinOffOf: string | null;
+  compilationOf: { title: string; seen: boolean } | null;
   myStatus: MyStatus;
   reasons: { label: string; lift: number }[];
   warnings: { label: string; lift: number }[];
@@ -496,6 +520,8 @@ export interface Pick {
   cantAdd: string | null;
   /** No TVDB match yet, but Sonarr's title search can find it (the UI offers a picker). */
   needsMatch: boolean;
+  /** Matched through its earlier season in Sonarr because the community list hasn't caught up yet. */
+  matchGuessed: boolean;
   verdict: string | null;
 }
 
@@ -539,6 +565,35 @@ function airsInto(m: Media, seasonStart: number) {
   return lastAir >= seasonStart;
 }
 
+/**
+ * A new season the community list hasn't mapped yet, whose previous season is in Sonarr: same TVDB series, next season
+ * number when Sonarr already lists it and nothing else claims it. Otherwise the season stays unknown (new episodes
+ * only), which is also right for split-cour "Part 2"s that TVDB files under the same season.
+ */
+function inferMapping(m: Media, immediate: Media | null, ctx: Ctx): Mapping | undefined {
+  if (!EPISODIC_FORMATS.has(m.format ?? "")) return undefined;
+  // Already added to Sonarr under exactly this title (by hand, or by Sonarr's own search): that's the match.
+  const norm = (t: string | null | undefined) => (t ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const names = new Set([norm(m.title.english), norm(m.title.romaji)].filter(Boolean));
+  for (const series of ctx.lib.values()) {
+    if (!names.has(norm(series.title)) || ctx.byTvdb.has(series.tvdbId)) continue;
+    const real = series.seasons.filter((x) => x.seasonNumber > 0).length;
+    const out = { tvdbId: series.tvdbId, season: real === 1 ? 1 : null };
+    setInferred(m.id, out);
+    return out;
+  }
+  if (!immediate || !EPISODIC_FORMATS.has(immediate.format ?? "")) return undefined;
+  const pm = ctx.byAnilist.get(immediate.id);
+  const series = pm ? ctx.lib.get(pm.tvdbId) : undefined;
+  if (!pm || !series) return undefined;
+  const next = pm.season ? pm.season + 1 : null;
+  const claimed = (ctx.byTvdb.get(pm.tvdbId) ?? []).some((id) => ctx.byAnilist.get(id)?.season === next);
+  const season = next && !claimed && series.seasons.some((x) => x.seasonNumber === next) && !/part\s*(2|ii)|2nd cour|cour 2/i.test(`${m.title.english} ${m.title.romaji}`) ? next : null;
+  const out = { tvdbId: pm.tvdbId, season };
+  setInferred(m.id, out);
+  return out;
+}
+
 function ownStatus(id: number, m: Media, ctx: Ctx, inLibrary: boolean): MyStatus {
   const map = ctx.byAnilist.get(id);
   if (map && ctx.dropped.has(map.tvdbId)) return "dropped";
@@ -579,10 +634,26 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
         .map(cachedMedia)
         .filter((x): x is Media => !!x && x.format !== "MUSIC")
         .sort((a, b) => Number(EPISODIC_FORMATS.has(b.format ?? "")) - Number(EPISODIC_FORMATS.has(a.format ?? "")));
-    const immediate = (m.format === "MOVIE" ? prequelIds(m).map(cachedMedia).filter((x): x is Media => !!x) : episodicFirst(prequelIds(m)))[0] ?? null;
+    // A recap special or OVA between two seasons isn't a season: look through it to what came before.
+    const stepBack = (x: Media) => {
+      const out: Media[] = [];
+      const seen = new Set<number>();
+      const visit = (ids: number[], hops: number) => {
+        for (const y of episodicFirst(ids)) {
+          if (seen.has(y.id)) continue;
+          seen.add(y.id);
+          const before = !EPISODIC_FORMATS.has(y.format ?? "") && y.format !== "MOVIE" && hops < 2 ? prequelIds(y) : [];
+          if (before.length) visit(before, hops + 1);
+          else out.push(y);
+        }
+      };
+      visit(prequelIds(x), 0);
+      return episodicFirst(out.map((y) => y.id));
+    };
+    const immediate = stepBack(m)[0] ?? null;
     let pre: { label: Label; media: Media; depth: number } | null = null;
     const chain = new Set<number>([m.id]);
-    let frontier = m.format === "MOVIE" ? prequelIds(m) : episodicFirst(prequelIds(m)).map((x) => x.id);
+    let frontier = stepBack(m).map((x) => x.id);
     for (let depth = 0; depth < 3 && frontier.length && !pre; depth++) {
       const next: number[] = [];
       for (const pid of frontier) {
@@ -595,7 +666,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
         // (people watch on other devices, or Plex history is incomplete): treat a chosen prequel as "kept".
         if ((TUNE.chosePre ?? 1) && l.p < 1 && l.p > 0.3 && chose(pid, ctx)) l = { ...l, p: 1, known: true };
         if (l.known && (l.p >= 1 || l.p <= 0.3) && (!pre || l.p > pre.label.p)) pre = { label: l, media: pm, depth };
-        next.push(...episodicFirst(prequelIds(pm)).map((x) => x.id));
+        next.push(...stepBack(pm).map((x) => x.id));
       }
       frontier = next;
     }
@@ -617,8 +688,8 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     if (pl && pre && pre.depth > 0 && franchise > 0) franchise -= 0.5 * pre.depth; // a season or more behind
     if (!pl && parentLabel?.known && parentLabel.p >= 1 && !tiny) franchise = 0.5;
 
-    const map = ctx.byAnilist.get(m.id);
     const isMovie = m.format === "MOVIE";
+    const map = ctx.byAnilist.get(m.id) ?? (isMovie || opts.blind ? undefined : inferMapping(m, immediate, ctx));
     const tmdbId = isMovie ? (ctx.movieByAnilist.get(m.id) ?? null) : null;
     const imdbId = isMovie ? (ctx.imdbByAnilist.get(m.id) ?? null) : null;
     const inLib = !isMovie && map ? ctx.lib.get(map.tvdbId) : undefined;
@@ -628,18 +699,28 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
 
     const verdictAdj = verdict === "disliked" || verdict === "hidden" ? -10 : verdict === "loved" || verdict === "liked" || verdict === "added" ? 3 : 0;
     const statusAdj = myStatus === "planning" ? 1.5 : myStatus === "dropped" ? -6 : 0;
-    const popTerm = (TUNE.pct ?? 1.2) * pct(m.popularity) + (TUNE.pop ?? 0.6) * Math.log10(Math.max(m.popularity, (immediate?.popularity ?? 0) * 0.3, 10));
+    // Before a show airs its AniList popularity is a fraction of what it ends at (the eval sees final numbers), so the
+    // absolute term gets a floor there; the within-season percentile still orders pre-air shows against each other.
+    const preAir = m.status === "NOT_YET_RELEASED";
+    const logPop = Math.log10(Math.max(m.popularity, (immediate?.popularity ?? 0) * 0.3, 10));
+    const popTerm = (TUNE.pct ?? 1.2) * pct(m.popularity) + (TUNE.pop ?? 0.6) * (preAir ? Math.max(logPop, TUNE.preAirPop ?? 4.2) : logPop);
     const score = taste + popTerm + franchise + verdictAdj + statusAdj;
     let match = toMatch(score);
     if (pl && pl.p >= 1.5 && pre?.depth === 0) match = Math.max(match, 90);
     const lowConfidence = (t.length < 4 && !pl) || (tiny && !pl);
     if (tiny) match = Math.min(match, 80);
+    // Something they're already watching: the % should never contradict the "Watching" badge.
+    const listed = opts.blind ? undefined : ctx.lists.get(m.id);
+    if (myStatus === "watching") match = Math.max(match, (listed?.progress ?? 3) >= 3 ? 90 : 75);
+    // Compilation / recap films retell a series: label them as such rather than as a spin-off.
+    const compilation = isMovie && !!parent && /\b(compilation|recap|recompil|re-?edit|summary)/i.test(m.description ?? "");
 
-    const byLift = feats.filter((f) => profile.features[f] && !QUIET_TAGS.has(f.slice(2))).map((f) => ({ label: label(f), lift: Math.round(profile.features[f].lift * 10) / 10 }));
+    // Where a show came from ("light novel adaptation") ranks, but makes a confusing reason chip, so it isn't shown.
+    const byLift = feats.filter((f) => profile.features[f] && !f.startsWith("S:") && !QUIET_TAGS.has(f.slice(2))).map((f) => ({ label: label(f), lift: Math.round(profile.features[f].lift * 10) / 10 }));
 
     const continuing = !!pl && pl.p >= 1;
     let similar: string | null = null;
-    if (!continuing) {
+    if (!continuing && !compilation) {
       const mine = new Set(feats.filter((f) => !QUIET_TAGS.has(f.slice(2))));
       let bestJ = 0.35;
       for (const f of profile.favourites) {
@@ -666,17 +747,27 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
               ? "You stopped watching this"
               : continuing
                 ? null
-                : badGenre
+                : badGenre && taste < 1
                   ? `You said never ${badGenre}`
                   : badTag
                     ? badTag.name === "Kids"
                       ? "Aimed at young kids"
                       : GORE_TAGS.includes(badTag.name)
                         ? "Graphic violence"
-                        : `You said never ${badTag.name}`
+                        : `You said never ${label(`T:${badTag.name}`)}`
                     : null;
 
     const carryOver = opts.carryIds?.has(m.id) ?? false;
+    const continues =
+      immediate && (EPISODIC_FORMATS.has(immediate.format ?? "") === EPISODIC_FORMATS.has(m.format ?? "") || isMovie)
+        ? {
+            // Split cours often share an English title ("Season 2 Part 2" vs "Season 2"); fall back to romaji then.
+            title: title(immediate) === title(m) ? (immediate.title.romaji ?? title(immediate)) : title(immediate),
+            watched: !!pl && pl.p >= 1.5 && pre!.depth === 0,
+            kept: !!pl && pl.p >= 1,
+            behind: pre?.depth ?? 0,
+          }
+        : null;
     const hasSequelChain = prequelIds(m).length > 0;
     const section: Section = isMovie
       ? "movies"
@@ -687,6 +778,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
           : "new";
     const addVia = isMovie ? ((tmdbId || imdbId) && radarrConfigured() ? "radarr" : null) : sonarrOn ? "sonarr" : null;
     const needsMatch = !isMovie && sonarrOn && !map;
+    const matchGuessed = !!map && !ctx.byAnilist.has(m.id);
     const cantAdd = addVia ? null : isMovie ? (radarrConfigured() ? "Not matched to a movie database yet" : null) : null;
     const desc = m.description?.replace(/~!.*?!~/gs, "[spoiler hidden]").replace(/<[^>]+>/g, "").replace(/\s*\(Source:[^)]*\)\s*$/i, "").trim();
 
@@ -717,10 +809,10 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       score,
       match,
       lowConfidence,
-      continues: immediate && EPISODIC_FORMATS.has(immediate.format ?? "") === EPISODIC_FORMATS.has(m.format ?? "") || (immediate && isMovie)
-        ? { title: title(immediate!), watched: !!pl && pl.p >= 1.5 && pre!.depth === 0, kept: !!pl && pl.p >= 1, behind: pre?.depth ?? 0 }
-        : null,
-      spinOffOf: !pl && parent ? title(parent) : null,
+      continues,
+      // One franchise line per card: "continues" wins, then "compilation of", then "spin-off of".
+      spinOffOf: !continues && !compilation && !pl && parent ? title(parent) : null,
+      compilationOf: compilation && parent ? { title: title(parent), seen: !!parentLabel?.known && parentLabel.p >= 1 } : null,
       myStatus,
       reasons: byLift.filter((x) => x.lift >= 1.3).sort((a, b) => b.lift - a.lift).slice(0, 3),
       warnings: byLift.filter((x) => x.lift <= 0.6).sort((a, b) => a.lift - b.lift).slice(0, 2),
@@ -734,6 +826,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       addVia,
       cantAdd,
       needsMatch,
+      matchGuessed,
       verdict,
     };
   });
@@ -750,7 +843,9 @@ export async function recommend(season: Season, year: number, refresh = false): 
   const ids = new Set(list.map((m) => m.id));
   const followed = new Set<number>(ctx.following);
   for (const [id, e] of ctx.lists) if (e.status === "CURRENT" || e.status === "PLANNING") followed.add(id);
-  for (const [tvdb, x] of ctx.lib) if (x.seriesType === "anime" && x.status === "continuing" && x.monitored) for (const id of ctx.byTvdb.get(tvdb) ?? []) followed.add(id);
+  // For a season that hasn't started, shows already in Sonarr are on My Shows; don't let them fill the top of next season.
+  const upcoming = seasonStart > Date.now();
+  if (!upcoming) for (const [tvdb, x] of ctx.lib) if (x.seriesType === "anime" && x.status === "continuing" && x.monitored) for (const id of ctx.byTvdb.get(tvdb) ?? []) followed.add(id);
   const carryCandidates = (await getMediaByIds([...followed].filter((id) => !ids.has(id)).slice(0, 400)).catch(() => [] as Media[])).filter(
     (m) => ok(m) && airsInto(m, seasonStart) && m.seasonYear !== null && (m.seasonYear ?? 0) * 4 + SEASONS.indexOf(m.season ?? "WINTER") < year * 4 + SEASONS.indexOf(season),
   );
