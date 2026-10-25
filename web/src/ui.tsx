@@ -2,25 +2,39 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 
 // ---------------------------------------------------------------- toasts
 
-interface Toast { id: number; msg: string; error: boolean }
-const ToastCtx = createContext<(msg: string, error?: boolean) => void>(() => undefined);
+interface Toast { id: number; msg: string; error: boolean; action?: { label: string; run: () => void } }
+type Push = (msg: string, error?: boolean, action?: Toast["action"]) => void;
+const ToastCtx = createContext<Push>(() => undefined);
 export const useToast = () => useContext(ToastCtx);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((msg: string, error = false) => {
+  const push = useCallback<Push>((msg, error = false, action) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-2), { id, msg, error }]);
-    if (!error) setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
+    // Same error again (e.g. a service that's down): replace it instead of stacking.
+    setToasts((t) => [...t.filter((x) => !(x.error && error && x.msg === msg)).slice(-2), { id, msg, error, action }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), error ? 12_000 : action ? 8000 : 4500);
   }, []);
+  const close = (id: number) => setToasts((x) => x.filter((y) => y.id !== id));
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="toasts" role="status" aria-live="polite">
+      <div className="toasts">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast${t.error ? " err" : ""}`}>
+          <div key={t.id} className={`toast${t.error ? " err" : ""}`} role={t.error ? "alert" : "status"}>
             <span>{t.msg}</span>
-            <button className="icon" aria-label="Dismiss" onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}>
+            {t.action && (
+              <button
+                className="ghost small"
+                onClick={() => {
+                  t.action!.run();
+                  close(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
+            <button className="icon" aria-label="Dismiss" onClick={() => close(t.id)}>
               ✕
             </button>
           </div>
@@ -30,14 +44,52 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// ---------------------------------------------------------------- dialogs
+
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLElement>("button, select, input")?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      prev?.focus();
+    };
+  }, [onClose]);
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal card" role="dialog" aria-modal="true" aria-label={title} ref={ref} onClick={(e) => e.stopPropagation()}>
+        <div className="card-head">
+          <h2>{title}</h2>
+          <button className="icon" aria-label="Close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function ErrorBox({ error, retry }: { error: string; retry: () => void }) {
+  return (
+    <div className="banner error-box" role="alert">
+      <p>Something went wrong: {error}</p>
+      <button onClick={retry}>Try again</button>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- inputs
 
 /** Password-style field for secrets, with a show/hide toggle. */
-export function SecretInput({ value, onChange, placeholder, label }: { value: string; onChange: (v: string) => void; placeholder?: string; label: string }) {
+export function SecretInput({ value, onChange, placeholder, label, readOnly }: { value: string; onChange: (v: string) => void; placeholder?: string; label: string; readOnly?: boolean }) {
   const [show, setShow] = useState(false);
   return (
     <span className="secret">
-      <input type={show ? "text" : "password"} value={value} placeholder={placeholder} aria-label={label} autoComplete="off" onChange={(e) => onChange(e.target.value)} />
+      <input type={show ? "text" : "password"} value={value} placeholder={placeholder} aria-label={label} autoComplete="off" readOnly={readOnly} onChange={(e) => onChange(e.target.value)} />
       <button type="button" className="ghost small" onClick={() => setShow(!show)} aria-label={show ? `Hide ${label}` : `Show ${label}`}>
         {show ? "Hide" : "Show"}
       </button>
@@ -92,6 +144,7 @@ export function Chips<T extends string | number>({ options, value, onChange, lab
         const on = value.includes(o.id);
         return (
           <button type="button" key={String(o.id)} className={`chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== o.id) : [...value, o.id])}>
+            {on ? "✓ " : ""}
             {o.label}
           </button>
         );
@@ -142,4 +195,10 @@ export function airLabel(ms: number) {
   if (diff === 1) return `Tomorrow ${time}`;
   if (diff > 1 && diff < 7) return `${d.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
   return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
+}
+
+export function dateLabel(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!m) return String(y);
+  return new Date(y, m - 1, d || 1).toLocaleDateString(undefined, d ? { month: "short", day: "numeric", year: "numeric" } : { month: "long", year: "numeric" });
 }

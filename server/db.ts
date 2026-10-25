@@ -30,6 +30,8 @@ const MIGRATIONS: string[] = [
   // 3: follow list for people without Sonarr, and which aired episodes were already announced
   `CREATE TABLE IF NOT EXISTS following (anilist_id INTEGER PRIMARY KEY, title TEXT NOT NULL, at INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS aired_notified (anilist_id INTEGER NOT NULL, episode INTEGER NOT NULL, PRIMARY KEY (anilist_id, episode));`,
+  // 4: user-confirmed TVDB matches for shows the community mapping doesn't cover yet
+  `CREATE TABLE IF NOT EXISTS mapping_overrides (anilist_id INTEGER PRIMARY KEY, tvdb_id INTEGER NOT NULL, season INTEGER, at INTEGER NOT NULL);`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

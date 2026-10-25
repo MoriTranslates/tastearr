@@ -44,11 +44,16 @@ export async function radarrMovies(force = false): Promise<RadarrMovie[]> {
   return list;
 }
 
-export async function addMovie(tmdbId: number) {
+/** Adds a movie by TMDB id, or by IMDb id when the community mapping has no TMDB id for it. */
+export async function addMovie(ids: { tmdbId?: number | null; imdbId?: string | null }) {
   const cfg = getSettings().radarr;
   if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw new Error("Pick a Radarr quality profile and root folder in Settings first");
-  const m = await call<RadarrMovie>("GET", `/movie/lookup/tmdb?tmdbId=${tmdbId}`);
-  if (!m?.tmdbId) throw new Error(`Radarr found no movie for TMDB ${tmdbId}`);
+  const m = ids.tmdbId
+    ? await call<RadarrMovie>("GET", `/movie/lookup/tmdb?tmdbId=${ids.tmdbId}`)
+    : ids.imdbId && /^tt\d+$/.test(ids.imdbId)
+      ? await call<RadarrMovie>("GET", `/movie/lookup/imdb?imdbId=${ids.imdbId}`)
+      : null;
+  if (!m?.tmdbId) throw new Error("Radarr couldn't find this movie");
   let tag: number | null = null;
   try {
     const tags = await call<{ id: number; label: string }[]>("GET", "/tag");

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type ArrOptions, type Settings } from "./api";
 import { Chips, NumberInput, Pill, SecretInput, useToast } from "./ui";
 
@@ -92,39 +92,37 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
   const [apiKey, setApiKey] = useState(cfg.apiKey);
   const [opts, setOpts] = useState<ArrOptions | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const [draft, setDraft] = useState(cfg);
   const [busy, setBusy] = useState(false);
   const name = kind === "sonarr" ? "Sonarr" : "Radarr";
 
-  useEffect(() => {
-    setUrl(cfg.url);
-    setApiKey(cfg.apiKey);
-    setDraft(cfg);
-  }, [cfg]);
-
-  async function test() {
+  async function test(quiet = false) {
     setBusy(true);
     try {
       const r = await api<{ version: string; options: ArrOptions }>(`/${kind}/test`, { body: { url, apiKey } });
       setVersion(r.version);
+      setFailed(false);
       setOpts(r.options);
     } catch (e) {
       setVersion(null);
-      toast(`${name}: ${(e as Error).message}`, true);
+      setFailed(true);
+      if (!quiet) toast(`${name}: ${(e as Error).message}`, true);
     } finally {
       setBusy(false);
     }
   }
 
   useEffect(() => {
-    if (cfg.url && cfg.apiKey) void test();
+    if (cfg.url && cfg.apiKey) void test(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function submit() {
     setBusy(true);
     try {
-      await save({ [kind]: { ...draft, url, apiKey } } as Partial<Settings>);
+      const next = await save({ [kind]: { ...draft, url, apiKey } } as Partial<Settings>);
+      setApiKey(next[kind].apiKey);
       toast(`${name} saved`);
       onSaved?.();
     } catch (e) {
@@ -139,7 +137,7 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
     <div className="card pad stack">
       <div className="card-head">
         <h2>{name}</h2>
-        <Pill ok={version ? true : connected ? null : false}>{version ? `Connected · v${version}` : connected ? "Saved" : "Not set up"}</Pill>
+        <Pill ok={version ? true : failed || !connected ? false : null}>{version ? `Connected · v${version}` : failed ? "Can't connect" : connected ? "Saved" : "Not set up"}</Pill>
       </div>
       <p className="muted small">
         {kind === "sonarr" ? (
@@ -162,7 +160,7 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
         </label>
       </div>
       <div className="row">
-        <button className="ghost" disabled={busy || !url} onClick={test}>
+        <button className="ghost" disabled={busy || !url} onClick={() => test()}>
           Test
         </button>
       </div>
@@ -254,6 +252,15 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
   const [plex, setPlex] = useState<{ pinId: number; servers: PlexServer[] | null } | null>(null);
   const [serverPick, setServerPick] = useState<{ id: string; url: string }>({ id: "", url: "" });
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [manual, setManual] = useState(false);
+  const cancelled = useRef(false);
+  useEffect(
+    () => () => {
+      cancelled.current = true;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (m.type !== "none" && m.url && m.token) void test(true);
@@ -265,10 +272,12 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
     try {
       const r = await api<{ name: string; version: string; users: { id: string; name: string }[]; libraries: { id: string; title: string }[] }>("/media/test", { body: { type, url, token, userId } });
       setInfo(`${r.name} · v${r.version}`);
+      setFailed(false);
       setUsers(r.users);
       setLibs(r.libraries);
     } catch (e) {
       setInfo(null);
+      setFailed(true);
       if (!quiet) toast((e as Error).message, true);
     } finally {
       setBusy(false);
@@ -276,6 +285,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
   }
 
   async function plexSignIn() {
+    cancelled.current = false;
     const popup = window.open("about:blank", "plexauth", "width=600,height=700");
     try {
       const pin = await api<{ id: number; authUrl: string }>("/plex/pin", { body: {} });
@@ -284,6 +294,15 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       setPlex({ pinId: pin.id, servers: null });
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => setTimeout(r, 2000));
+        if (cancelled.current) return;
+        if (popup?.closed && i > 2) {
+          // The popup closes itself after approving, so check once more before giving up.
+          const last = await api<{ done: boolean }>(`/plex/pin/${pin.id}`).catch(() => ({ done: false }));
+          if (!last.done) {
+            setPlex(null);
+            return;
+          }
+        }
         const r = await api<{ done: boolean; servers?: PlexServer[] }>(`/plex/pin/${pin.id}`);
         if (r.done) {
           popup?.close();
@@ -333,11 +352,12 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
   }
 
   const server = plex?.servers?.find((x) => x.id === serverPick.id);
+  const configuredPlex = m.type === "plex" && !!m.url && !!m.token;
   return (
     <div className="card pad stack">
       <div className="card-head">
         <h2>Watch history</h2>
-        <Pill ok={info ? true : m.type === "none" ? false : null}>{info ?? (m.type === "none" ? "Not set up" : "Saved")}</Pill>
+        <Pill ok={info ? true : failed || m.type === "none" ? false : null}>{info ?? (failed ? "Can't connect" : m.type === "none" ? "Not set up" : "Saved")}</Pill>
       </div>
       <p className="muted small">
         <strong>Read-only.</strong> Tastearr reads how many episodes you've watched of each show. Finished shows count strongly toward your taste and shows you dropped early count
@@ -352,11 +372,54 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       </div>
       {type === "plex" && (
         <>
-          <button className="primary plex" onClick={plexSignIn} disabled={busy}>
-            Sign in with Plex
-          </button>
-          <p className="muted small">Gives Tastearr its own access you can revoke any time in Plex → Authorized Devices. Your Plex password never touches Tastearr.</p>
-          {plex && !plex.servers && <p className="muted small">Waiting for you to approve in the Plex window…</p>}
+          {configuredPlex && (
+            <p className="small">
+              Connected to <code>{m.url}</code>.{" "}
+              <button className="linklike small" onClick={() => test()}>
+                Test again
+              </button>
+            </p>
+          )}
+          <div className="row">
+            <button className="primary plex" onClick={plexSignIn} disabled={busy || (!!plex && !plex.servers)}>
+              {configuredPlex ? "Sign in with Plex again" : "Sign in with Plex"}
+            </button>
+            <button className="linklike small" onClick={() => setManual(!manual)}>
+              {manual ? "Hide" : "Enter address and token instead"}
+            </button>
+          </div>
+          <p className="muted small">Signing in gives Tastearr its own access, which you can remove any time in Plex → Authorized Devices. Your Plex password never touches Tastearr.</p>
+          {plex && !plex.servers && (
+            <p className="muted small">
+              Waiting for you to approve in the Plex window…{" "}
+              <button
+                className="linklike small"
+                onClick={() => {
+                  cancelled.current = true;
+                  setPlex(null);
+                }}
+              >
+                Cancel
+              </button>
+            </p>
+          )}
+          {manual && (
+            <div className="form">
+              <label>
+                Address
+                <input value={url} placeholder="http://192.168.1.10:32400" onChange={(e) => setUrl(e.target.value)} />
+              </label>
+              <label>
+                Plex token
+                <SecretInput label="Plex token" value={token} onChange={setToken} />
+              </label>
+              <div className="row wide">
+                <button className="ghost" disabled={busy || !url} onClick={() => test()}>
+                  Test
+                </button>
+              </div>
+            </div>
+          )}
           {plex?.servers && (
             <div className="form">
               <label>
@@ -492,24 +555,24 @@ export function ListsCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
 
 // ---------------------------------------------------------------- alerts
 
-export function AlertsCard({ s, save }: { s: Settings; save: Save }) {
+export function AlertsCard({ s, save, simple }: { s: Settings; save: Save; simple?: boolean }) {
   const toast = useToast();
   const [n, setN] = useState(s.notify);
   const [ext, setExt] = useState(s.externalUrl);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    setN(s.notify);
-    setExt(s.externalUrl);
-  }, [s]);
+  const [moreOpen, setMoreOpen] = useState(!!(s.notify.gotifyUrl || s.notify.discordWebhook));
   const base = ext || location.origin;
+  const server = s.mode !== "stream" && !simple;
+  const [example] = useState(() => `anime-${Math.random().toString(36).slice(2, 8)}`);
 
   async function submit(thenTest = false) {
     setBusy(true);
     try {
-      await save({ notify: n, externalUrl: ext });
+      const saved = await save({ notify: n, externalUrl: ext });
+      setN(saved.notify);
       if (thenTest) {
         const r = await api<{ sent: string[] }>("/notify/test", { body: {} });
-        toast(r.sent.length ? `Sent to ${r.sent.join(", ")}` : "Nothing set up to send to yet", !r.sent.length);
+        toast(r.sent.length ? `Test sent to ${r.sent.join(", ")}. Check your phone.` : "Nothing set up to send to yet", !r.sent.length);
       } else toast("Alerts saved");
     } catch (e) {
       toast((e as Error).message, true);
@@ -518,80 +581,104 @@ export function AlertsCard({ s, save }: { s: Settings; save: Save }) {
     }
   }
 
-  const copy = (text: string) => navigator.clipboard?.writeText(text).then(() => toast("Copied"), () => toast("Couldn't copy", true));
+  const copy = (text: string) => navigator.clipboard?.writeText(text).then(() => toast("Copied"), () => toast("Couldn't copy, select it and copy by hand", true));
   return (
     <div className="card pad stack">
-      <h2>Alerts</h2>
-      <p className="muted small">
-        For phone alerts, install the free <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app, subscribe to a topic name only you know, and paste its
-        address here. Gotify and Discord work too.
-      </p>
+      <h2>Phone alerts</h2>
+      <ol className="howto-steps small">
+        <li>
+          Install the free <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app on your phone.
+        </li>
+        <li>In the app, tap + and subscribe to a made-up name only you'd guess, like <code>{example}</code>.</li>
+        <li>Type the same name below, then press "Save & send test".</li>
+      </ol>
       <div className="form">
         <label>
-          ntfy topic address
-          <input value={n.ntfyUrl} placeholder="https://ntfy.sh/my-secret-anime-topic" onChange={(e) => setN({ ...n, ntfyUrl: e.target.value })} />
+          ntfy topic name
+          <input value={n.ntfyUrl} placeholder={example} onChange={(e) => setN({ ...n, ntfyUrl: e.target.value })} />
         </label>
-        <label>
-          ntfy access token (optional)
-          <SecretInput label="ntfy token" value={n.ntfyToken} onChange={(v) => setN({ ...n, ntfyToken: v })} />
-        </label>
-        <label>
-          Gotify address
-          <input value={n.gotifyUrl} onChange={(e) => setN({ ...n, gotifyUrl: e.target.value })} />
-        </label>
-        <label>
-          Gotify app token
-          <SecretInput label="Gotify token" value={n.gotifyToken} onChange={(v) => setN({ ...n, gotifyToken: v })} />
-        </label>
-        <label>
-          Discord webhook
-          <SecretInput label="Discord webhook" value={n.discordWebhook} onChange={(v) => setN({ ...n, discordWebhook: v })} />
-        </label>
-        <label>
-          Shows in the new-season alert
-          <NumberInput label="Shows in alert" min={3} max={30} value={n.picks} onChange={(v) => setN({ ...n, picks: v })} />
+        <label className="check">
+          <input type="checkbox" checked={n.airingAlerts} onChange={(e) => setN({ ...n, airingAlerts: e.target.checked })} /> When a show I follow has a new episode
         </label>
         <label className="check">
           <input type="checkbox" checked={n.seasonAlerts} onChange={(e) => setN({ ...n, seasonAlerts: e.target.checked })} /> When next season's picks are ready
         </label>
-        <label className="check">
-          <input type="checkbox" checked={n.episodeAlerts} onChange={(e) => setN({ ...n, episodeAlerts: e.target.checked })} /> When Sonarr/Radarr finishes a download
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={n.airingAlerts} onChange={(e) => setN({ ...n, airingAlerts: e.target.checked })} /> When a show I follow airs (with where to stream it)
-        </label>
-        <label className="wide">
-          Address your phone can reach Tastearr at (optional; enables the "Not into it anymore" button on alerts)
-          <input value={ext} placeholder="https://tastearr.example.com" onChange={(e) => setExt(e.target.value)} />
-        </label>
+        {server && (
+          <label className="check">
+            <input type="checkbox" checked={n.episodeAlerts} onChange={(e) => setN({ ...n, episodeAlerts: e.target.checked })} /> When Sonarr/Radarr finishes downloading
+          </label>
+        )}
       </div>
       <div className="row end">
-        <button className="ghost" disabled={busy} onClick={() => submit(true)}>
+        <button className="ghost" disabled={busy} onClick={() => submit(false)}>
+          Save
+        </button>
+        <button className="primary" disabled={busy} onClick={() => submit(true)}>
           Save & send test
         </button>
-        <button className="primary" disabled={busy} onClick={() => submit()}>
-          Save alerts
-        </button>
       </div>
-      <div className="howto">
-        <h3>Download alerts from Sonarr / Radarr</h3>
-        <ol>
-          <li>In Sonarr (or Radarr) open Settings → Connect → + → Webhook.</li>
-          <li>Tick "On Import" only, and paste this address:</li>
-        </ol>
-        {(["sonarr", "radarr"] as const).map((k) => {
-          const u = `${base}/api/webhook/${k}/${s.webhookKey}`;
-          return (
-            <div key={k} className="copyrow">
-              <span className="small muted">{k === "sonarr" ? "Sonarr" : "Radarr"}</span>
-              <code className="trunc">{u}</code>
-              <button className="ghost small" onClick={() => copy(u)}>
-                Copy
-              </button>
+      {!simple && (
+        <>
+          <button className="linklike small left" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
+            {moreOpen ? "Fewer options" : "More options (Gotify, Discord, timing, buttons)"}
+          </button>
+          {moreOpen && (
+            <div className="form">
+              <label>
+                ntfy access token (only for a private ntfy server)
+                <SecretInput label="ntfy token" value={n.ntfyToken} onChange={(v) => setN({ ...n, ntfyToken: v })} />
+              </label>
+              <label>
+                Gotify address
+                <input value={n.gotifyUrl} onChange={(e) => setN({ ...n, gotifyUrl: e.target.value })} />
+              </label>
+              <label>
+                Gotify app token
+                <SecretInput label="Gotify token" value={n.gotifyToken} onChange={(v) => setN({ ...n, gotifyToken: v })} />
+              </label>
+              <label>
+                Discord webhook
+                <SecretInput label="Discord webhook" value={n.discordWebhook} onChange={(v) => setN({ ...n, discordWebhook: v })} />
+              </label>
+              <label>
+                Wait this many minutes after it airs in Japan before saying an episode is out
+                <NumberInput label="Minutes to wait" min={0} max={1440} value={n.airingDelayMin} onChange={(v) => setN({ ...n, airingDelayMin: v })} />
+              </label>
+              <label>
+                Shows in the new-season alert
+                <NumberInput label="Shows in alert" min={3} max={30} value={n.picks} onChange={(v) => setN({ ...n, picks: v })} />
+              </label>
+              {server && (
+                <label className="wide">
+                  Address your phone can reach Tastearr at (optional; adds a "Not into it anymore" button to alerts)
+                  <input value={ext} placeholder="https://tastearr.example.com" onChange={(e) => setExt(e.target.value)} />
+                </label>
+              )}
             </div>
-          );
-        })}
-      </div>
+          )}
+          {server && (
+            <div className="howto">
+              <h3>Download alerts from Sonarr / Radarr</h3>
+              <ol>
+                <li>In Sonarr (or Radarr) open Settings → Connect → + → Webhook.</li>
+                <li>Tick "On Import" only, and paste this address:</li>
+              </ol>
+              {(["sonarr", "radarr"] as const).map((k) => {
+                const u = `${base}/api/webhook/${k}/${s.webhookKey}`;
+                return (
+                  <div key={k} className="copyrow">
+                    <span className="small muted">{k === "sonarr" ? "Sonarr" : "Radarr"}</span>
+                    <code className="trunc">{u}</code>
+                    <button className="ghost small" onClick={() => copy(u)}>
+                      Copy
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

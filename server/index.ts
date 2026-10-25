@@ -4,21 +4,21 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
-import { getMediaByIds, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
-import { authState, COOKIE, csrfOk, guard, loginAllowed, loginSucceeded, makeSession, trustProxyOption, verifyAction } from "./auth.js";
+import { getMediaByIds, searchTitle, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
+import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, loginAllowed, loginSucceeded, makeSession, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
 import { listJobs, setJob } from "./db.js";
 import { discover, useDiscovered } from "./discover.js";
 import { announceAired, follow, followedIds, followedShows, unfollow } from "./following.js";
 import { refreshLists } from "./lists.js";
-import { mapAnilist, mappingTables } from "./mapping.js";
+import { mapAnilist, mappingTables, saveOverride } from "./mapping.js";
 import { listJellyfinUsers, listLibraries, plexCheckPin, plexCreatePin, plexServers, testMediaServer } from "./mediaserver.js";
 import { notifySeason, send } from "./notify.js";
 import { getQuiz } from "./quiz.js";
 import { addMovie, radarrOptions, testRadarr } from "./radarr.js";
-import { checkPassword, getSettings, isMasked, patchSettings, publicSettings, regenerateKey, safeEqual, setAccount, setGenrePrefs, updateSettings, type Settings } from "./settings.js";
+import { checkPassword, getSettings, isMasked, patchSettings, publicSettings, regenerateKey, safeEqual, setAccount, setBypassLocal, setGenrePrefs, updateSettings, type Settings } from "./settings.js";
 import { dropShow, handleRadarrWebhook, handleSonarrWebhook, myShows, undropShow } from "./shows.js";
-import { addSeries, monitorSeason, sonarrOptions, testSonarr } from "./sonarr.js";
-import { getProfile, invalidateContext, rebuildProfile, recommend, setFeedback, storedProfile } from "./taste.js";
+import { addSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrOptions, testSonarr, type MonitorChoice } from "./sonarr.js";
+import { getProfile, invalidateContext, isBuilding, rebuildProfile, recommend, setFeedback, storedProfile, title } from "./taste.js";
 
 function findPackageJson() {
   for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
@@ -64,11 +64,24 @@ const id = (v: string) => {
 
 /** A stored secret is only re-used for the URL it was saved with, so it can't be sent somewhere new. */
 function withSecret(url: unknown, secret: unknown, storedUrl: string, storedSecret: string) {
-  const u = String(url ?? "").trim().replace(/\/+$/, "");
+  const u = checkOutbound(String(url ?? "").trim().replace(/\/+$/, ""));
   const s = String(secret ?? "");
   if (s && !isMasked(s)) return { url: u, secret: s };
   if (u === storedUrl && storedSecret) return { url: u, secret: storedSecret };
   throw fail("Enter the API key/token again for a new address");
+}
+
+/** Outbound service URLs: http(s) only, never link-local / cloud metadata addresses. */
+function checkOutbound(url: string) {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw fail("That address isn't a valid URL (it should start with http://)");
+  }
+  if (!/^https?:$/.test(u.protocol)) throw fail("Address must start with http:// or https://");
+  if (/^(169\.254\.|0\.|\[?fe80:)/i.test(u.hostname) || u.hostname === "metadata.google.internal") throw fail("That address isn't allowed");
+  return url;
 }
 
 function sessionCookie(req: FastifyRequest, reply: FastifyReply, username: string) {
@@ -90,31 +103,44 @@ app.get("/api/status", { config: { setup: true } }, async (req) => {
     media: s.media.type !== "none" && !!s.media.url && !!s.media.token,
     lists: !!(s.lists.anilistUser || s.lists.malUser),
     quizAnswers: Object.keys(s.genrePrefs).length,
+    alerts: !!(s.notify.ntfyUrl || (s.notify.gotifyUrl && s.notify.gotifyToken) || s.notify.discordWebhook),
+    mode: s.mode,
     profileBuiltAt: storedProfile()?.builtAt ?? null,
+    building: isBuilding(),
+    prefs: { hideInLibrary: s.filters.hideInLibrary, hideShorts: s.filters.hideShorts },
     season: seasonOf(),
   };
 });
 
-app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean } }>("/api/auth/setup", { config: { setup: true } }, async (req, reply) => {
-  if (getSettings().auth.passwordHash) throw fail("Account already exists", 409);
+let settingUp = false;
+app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; setupToken?: string } }>("/api/auth/setup", { config: { setup: true } }, async (req, reply) => {
+  if (getSettings().auth.passwordHash || settingUp) throw fail("Account already exists", 409);
   if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
+  // A fresh install can only be claimed from the local network, or with the token printed in the container log.
+  const local = isLocalRequest(req) && hostAllowed(req);
+  if (!local && !safeEqual(String(req.body?.setupToken ?? ""), SETUP_TOKEN)) throw fail("Open Tastearr from your home network to create the account, or enter the setup code from the container log", 403);
   const username = String(req.body?.username ?? "").trim();
   const password = String(req.body?.password ?? "");
   if (!username || password.length < 8) throw fail("Choose a username and a password of at least 8 characters");
-  await setAccount(username, password);
-  patchSettings((s) => ({ ...s, auth: { ...s.auth, bypassLocal: req.body?.bypassLocal === true } }));
+  settingUp = true;
+  try {
+    await setAccount(username, password);
+    patchSettings((s) => ({ ...s, auth: { ...s.auth, bypassLocal: req.body?.bypassLocal === true } }));
+  } finally {
+    settingUp = false;
+  }
   sessionCookie(req, reply, username);
   return { ok: true };
 });
 
 app.post<{ Body: { username?: string; password?: string } }>("/api/auth/login", { config: { setup: true } }, async (req, reply) => {
   if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
-  if (!loginAllowed(req.ip)) throw fail("Too many attempts, try again in a few minutes", 429);
+  if (!loginAllowed(req.ip, String(req.body?.username ?? ""))) throw fail("Too many attempts, wait a minute and try again", 429);
   const a = getSettings().auth;
   const okUser = safeEqual(String(req.body?.username ?? ""), a.username);
   const okPass = await checkPassword(String(req.body?.password ?? ""), a.passwordHash || "00:00");
   if (!okUser || !okPass) throw fail("Wrong username or password", 401);
-  loginSucceeded(req.ip);
+  loginSucceeded(req.ip, a.username);
   sessionCookie(req, reply, a.username);
   return { ok: true };
 });
@@ -134,6 +160,13 @@ app.put<{ Body: { currentPassword?: string; username?: string; password?: string
   else patchSettings((s) => ({ ...s, auth: { ...s.auth, username } }));
   sessionCookie(req, reply, username); // changing the password rotated the signing secret
   return { ok: true };
+});
+
+/** "Authentication required" mode. Needs a real login session, so a bypassed LAN device can't turn the bypass on. */
+app.put<{ Body: { bypassLocal?: boolean } }>("/api/auth/mode", async (req) => {
+  if (authState(req).via !== "session") throw fail("Log in with your password to change this", 403);
+  setBypassLocal(req.body?.bypassLocal === true);
+  return { ok: true, bypassLocal: req.body?.bypassLocal === true };
 });
 
 // ---------------------------------------------------------------- settings & connections
@@ -192,7 +225,11 @@ app.post<{ Body: Partial<Settings["media"]> }>("/api/media/test", async (req) =>
 
 // "Sign in with Plex": the account token stays on the server; the browser only ever sees server names and URLs.
 const pins = new Map<number, { token: string | null; at: number }>();
+const prunePins = () => {
+  for (const [k, v] of pins) if (Date.now() - v.at > 15 * 60_000) pins.delete(k);
+};
 app.post("/api/plex/pin", async () => {
+  prunePins();
   const pin = await plexCreatePin();
   pins.set(pin.id, { token: null, at: Date.now() });
   return pin;
@@ -212,7 +249,7 @@ app.post<{ Body: { pinId: number; serverId: string; url: string } }>("/api/plex/
   const server = (await plexServers(p.token)).find((s) => s.id === req.body?.serverId);
   if (!server) throw fail("Server not found on your Plex account");
   const url = String(req.body?.url ?? "").replace(/\/+$/, "");
-  if (!server.urls.includes(url) && !/^https?:\/\//i.test(url)) throw fail("Pick one of the server's addresses");
+  if (!server.urls.includes(url)) throw fail("Pick one of the server's own addresses");
   const conn = { ...getSettings().media, type: "plex" as const, url, token: server.accessToken };
   const info = await testMediaServer(conn);
   patchSettings((s) => ({ ...s, media: { ...s.media, type: "plex", url, token: server.accessToken } }));
@@ -253,19 +290,49 @@ app.get<{ Querystring: Record<string, string | undefined> }>("/api/picks", async
   return { season, year, ...r, picks: r.picks.map((p) => ({ ...p, following: following.has(p.id) })) };
 });
 
-app.post<{ Params: { id: string } }>("/api/picks/:id/add", async (req) => {
+/** What "Add" will do, shown in the confirm dialog before anything is written to Sonarr/Radarr. */
+app.get<{ Params: { id: string } }>("/api/picks/:id/plan", async (req) => {
+  const anilistId = id(req.params.id);
+  const [m] = await getMediaByIds([anilistId]);
+  if (!m) throw fail("Unknown show", 404);
+  if (m.format === "MOVIE") {
+    const t = await mappingTables();
+    const tmdb = t.movieByAnilist.get(anilistId);
+    const imdb = t.imdbByAnilist.get(anilistId);
+    if (!tmdb && !imdb) throw fail("This movie isn't matched to TMDB or IMDb yet, so Radarr can't find it", 422);
+    const r = getSettings().radarr;
+    return { app: "radarr", title: m.title.english || m.title.romaji, rootFolder: r.rootFolderPath, search: r.searchOnAdd, minimumAvailability: r.minimumAvailability };
+  }
+  const map = await mapAnilist(anilistId);
+  if (!map) return { app: "sonarr", needsMatch: true };
+  return { app: "sonarr", ...(await planAdd(map.tvdbId, map.season)), resumesSeries: (await seriesMonitored(map.tvdbId)) === false };
+});
+
+/** Sonarr title-search candidates when the community mapping has no TVDB match yet. */
+app.get<{ Params: { id: string } }>("/api/picks/:id/candidates", async (req) => {
+  const [m] = await getMediaByIds([id(req.params.id)]);
+  if (!m) throw fail("Unknown show", 404);
+  return lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""]);
+});
+
+app.post<{ Params: { id: string }; Body: { monitor?: MonitorChoice; search?: boolean; tvdbId?: number; season?: number | null } }>("/api/picks/:id/add", async (req) => {
   const anilistId = id(req.params.id);
   const [m] = await getMediaByIds([anilistId]);
   if (!m) throw fail("Unknown show", 404);
   let r;
   if (m.format === "MOVIE") {
-    const tmdb = (await mappingTables()).movieByAnilist.get(anilistId);
-    if (!tmdb) throw fail("No TMDB match for this movie yet, so Radarr can't add it", 422);
-    r = await addMovie(tmdb);
+    const t = await mappingTables();
+    r = await addMovie({ tmdbId: t.movieByAnilist.get(anilistId), imdbId: t.imdbByAnilist.get(anilistId) });
   } else {
+    // A user-confirmed match (from the candidates picker) is remembered for next time.
+    if (req.body?.tvdbId) {
+      const season = req.body.season === null || req.body.season === undefined ? null : Number(req.body.season) || null;
+      saveOverride(anilistId, id(String(req.body.tvdbId)), season);
+    }
     const map = await mapAnilist(anilistId);
-    if (!map) throw fail("No TVDB match for this show yet, so Sonarr can't add it", 422);
-    r = await addSeries(map.tvdbId, map.season);
+    if (!map) throw fail("Pick the matching show first", 422);
+    const monitor = (["season", "all", "future", "none"] as const).find((x) => x === req.body?.monitor);
+    r = await addSeries(map.tvdbId, map.season, { monitor, search: typeof req.body?.search === "boolean" ? req.body.search : undefined });
   }
   setFeedback(anilistId, "added");
   invalidateContext();
@@ -299,6 +366,17 @@ app.post<{ Params: { id: string } }>("/api/picks/:id/unfollow", async (req) => u
 // ---------------------------------------------------------------- quiz
 
 app.get("/api/quiz", async () => getQuiz());
+/** "Add a show you've seen" in the quiz. */
+app.get<{ Querystring: { q?: string } }>("/api/quiz/search", async (req) => {
+  const q = String(req.query.q ?? "").trim().slice(0, 80);
+  if (q.length < 2) return [];
+  return (await searchTitle(q)).map((m) => ({ id: m.id, title: title(m), cover: m.coverImage.large, year: m.seasonYear ?? m.startDate?.year ?? null, format: m.format }));
+});
+app.put<{ Body: { noGore?: boolean } }>("/api/quiz/content", async (req) => {
+  patchSettings((s) => ({ ...s, filters: { ...s.filters, noGore: req.body?.noGore === true } }));
+  invalidateContext();
+  return { ok: true };
+});
 app.put<{ Body: { genrePrefs: unknown } }>("/api/quiz/genres", async (req) => {
   setGenrePrefs(req.body?.genrePrefs);
   return { ok: true };
@@ -323,6 +401,12 @@ app.post<{ Params: { tvdbId: string } }>("/api/shows/:tvdbId/undrop", async (req
 
 // ---------------------------------------------------------------- incoming (own credentials)
 
+// v0.1 webhook address (?apikey=<admin key>). Still accepted so upgrades don't silently lose alerts; logs a warning.
+app.post<{ Querystring: { apikey?: string } }>("/api/webhook/sonarr", { config: { public: true } }, async (req) => {
+  if (!safeEqual(req.query.apikey, getSettings().apiKey)) throw fail("Bad webhook key", 401);
+  app.log.warn("Sonarr is using the old v0.1 webhook address. Update it to the one shown in Settings → Alerts.");
+  return { sent: await handleSonarrWebhook(req.body as Parameters<typeof handleSonarrWebhook>[0]) };
+});
 app.post<{ Params: { key: string } }>("/api/webhook/sonarr/:key", { config: { public: true } }, async (req) => {
   if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad webhook key", 401);
   return { sent: await handleSonarrWebhook(req.body as Parameters<typeof handleSonarrWebhook>[0]) };
@@ -369,3 +453,5 @@ setInterval(tick, 6 * 3_600_000);
 setInterval(() => void announceAired().catch((e) => app.log.warn(`Airing alerts failed: ${(e as Error).message}`)), 30 * 60_000);
 
 await app.listen({ host: "0.0.0.0", port: PORT });
+if (!getSettings().auth.passwordHash)
+  app.log.info(`No account yet. Open Tastearr from your home network to create one, or use setup code ${SETUP_TOKEN} from elsewhere.`);

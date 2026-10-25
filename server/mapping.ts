@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CONFIG_DIR } from "./db.js";
+import { CONFIG_DIR, db } from "./db.js";
 
 /** AniList -> TVDB mapping from the community-maintained Fribb/anime-lists project. */
 const URL = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json";
@@ -18,6 +18,10 @@ let byTvdb: Map<number, number[]> | null = null;
 let byMal: Map<number, number> | null = null;
 /** AniList id -> TMDB movie id (for Radarr). */
 let movieByAnilist: Map<number, number> | null = null;
+/** AniList id -> IMDb id, for movies without a TMDB id (Radarr can look those up too). */
+let imdbByAnilist: Map<number, string> | null = null;
+/** AniDB id -> TVDB id, for Plex libraries using the HAMA agent. */
+let tvdbByAnidb: Map<number, number> | null = null;
 let anilistByMovie: Map<number, number[]> | null = null;
 let loadedAt = 0;
 
@@ -34,13 +38,18 @@ async function refresh() {
       console.warn("Mapping list refresh failed, using cached copy:", (e as Error).message);
     }
   }
-  const rows = JSON.parse(fs.readFileSync(FILE, "utf8")) as { anilist_id?: number; tvdb_id?: number; mal_id?: number; themoviedb_id?: { movie?: number[] | number; tv?: number }; season?: { tvdb?: number } }[];
+  const rows = JSON.parse(fs.readFileSync(FILE, "utf8")) as { anilist_id?: number; tvdb_id?: number; mal_id?: number; anidb_id?: number; imdb_id?: string[] | string; themoviedb_id?: { movie?: number[] | number; tv?: number }; season?: { tvdb?: number } }[];
   byAnilist = new Map();
   byTvdb = new Map();
   byMal = new Map();
   movieByAnilist = new Map();
   anilistByMovie = new Map();
+  imdbByAnilist = new Map();
+  tvdbByAnidb = new Map();
   for (const r of rows) {
+    const imdb = Array.isArray(r.imdb_id) ? r.imdb_id[0] : r.imdb_id;
+    if (r.anilist_id && imdb) imdbByAnilist.set(r.anilist_id, imdb);
+    if (r.anidb_id && r.tvdb_id && !tvdbByAnidb.has(r.anidb_id)) tvdbByAnidb.set(r.anidb_id, r.tvdb_id);
     if (r.anilist_id && r.mal_id) byMal.set(r.mal_id, r.anilist_id);
     const mv = r.themoviedb_id?.movie;
     const movie = Array.isArray(mv) ? mv[0] : mv;
@@ -52,7 +61,18 @@ async function refresh() {
     byAnilist.set(r.anilist_id, { tvdbId: r.tvdb_id, season: r.season?.tvdb ?? null });
     byTvdb.set(r.tvdb_id, [...(byTvdb.get(r.tvdb_id) ?? []), r.anilist_id]);
   }
+  // User-confirmed matches win over the community list.
+  for (const o of db.prepare("SELECT anilist_id, tvdb_id, season FROM mapping_overrides").all() as { anilist_id: number; tvdb_id: number; season: number | null }[]) {
+    byAnilist.set(o.anilist_id, { tvdbId: o.tvdb_id, season: o.season });
+    byTvdb.set(o.tvdb_id, [...new Set([...(byTvdb.get(o.tvdb_id) ?? []), o.anilist_id])]);
+  }
   loadedAt = Date.now();
+}
+
+export function saveOverride(anilistId: number, tvdbId: number, season: number | null) {
+  db.prepare("INSERT INTO mapping_overrides (anilist_id, tvdb_id, season, at) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET tvdb_id = excluded.tvdb_id, season = excluded.season, at = excluded.at").run(anilistId, tvdbId, season, Date.now());
+  byAnilist?.set(anilistId, { tvdbId, season });
+  byTvdb?.set(tvdbId, [...new Set([...(byTvdb?.get(tvdbId) ?? []), anilistId])]);
 }
 
 async function ensure() {
@@ -71,5 +91,5 @@ export async function anilistIdsForTvdb(tvdbId: number): Promise<number[]> {
 
 export async function mappingTables() {
   await ensure();
-  return { byAnilist: byAnilist!, byTvdb: byTvdb!, byMal: byMal!, movieByAnilist: movieByAnilist!, anilistByMovie: anilistByMovie! };
+  return { byAnilist: byAnilist!, byTvdb: byTvdb!, byMal: byMal!, movieByAnilist: movieByAnilist!, anilistByMovie: anilistByMovie!, imdbByAnilist: imdbByAnilist!, tvdbByAnidb: tvdbByAnidb! };
 }

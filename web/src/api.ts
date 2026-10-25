@@ -44,6 +44,10 @@ export interface Status {
   lists?: boolean;
   quizAnswers?: number;
   profileBuiltAt?: number | null;
+  building?: boolean;
+  prefs?: { hideInLibrary: boolean; hideShorts: boolean };
+  alerts?: boolean;
+  mode?: "server" | "stream" | "";
   season?: { season: Season; year: number };
 }
 
@@ -56,6 +60,7 @@ export interface Pick {
   format: string | null;
   status: string | null;
   episodes: number | null;
+  duration: number | null;
   studio: string | null;
   source: string | null;
   startDate: string | null;
@@ -72,7 +77,10 @@ export interface Pick {
   score: number;
   match: number;
   lowConfidence: boolean;
-  continues: { title: string; watched: boolean } | null;
+  continues: { title: string; watched: boolean; kept: boolean; behind: number } | null;
+  spinOffOf: string | null;
+  myStatus: "watching" | "seen" | "planning" | "following" | "dropped" | null;
+  needsMatch: boolean;
   reasons: { label: string; lift: number }[];
   warnings: { label: string; lift: number }[];
   similar: string | null;
@@ -92,6 +100,7 @@ export interface Profile {
   builtAt: number;
   trainedOn: number;
   positives: number;
+  known: number;
   features: Record<string, { lift: number; n: number; p: number }>;
   favourites: { id: number; title: string }[];
   sources: Record<string, string>;
@@ -133,14 +142,35 @@ export interface Settings {
   media: { type: "none" | "plex" | "jellyfin"; url: string; token: string; userId: string; libraryIds: string[] };
   lists: { anilistUser: string; malUser: string; malClientId: string };
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
-  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean };
+  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
   display: { titleLanguage: "english" | "romaji" | "native" };
+  mode: "server" | "stream" | "";
   genrePrefs: Record<string, Pref>;
-  notify: { discordWebhook: string; ntfyUrl: string; ntfyToken: string; gotifyUrl: string; gotifyToken: string; picks: number; seasonAlerts: boolean; episodeAlerts: boolean; airingAlerts: boolean };
+  notify: { discordWebhook: string; ntfyUrl: string; ntfyToken: string; gotifyUrl: string; gotifyToken: string; picks: number; seasonAlerts: boolean; episodeAlerts: boolean; airingAlerts: boolean; airingDelayMin: number };
   externalUrl: string;
   auth: { username: string; hasPassword: boolean; bypassLocal: boolean };
   webhookKey: string;
 }
+
+export interface AddPlan {
+  app: "sonarr" | "radarr";
+  needsMatch?: boolean;
+  title?: string;
+  year?: number | null;
+  monitor?: "season" | "all" | "future" | "none";
+  monitorLabel?: string;
+  season?: number | null;
+  seasonListed?: boolean;
+  search?: boolean;
+  profile?: string | null;
+  rootFolder?: string;
+  tags?: string[];
+  options?: { value: "season" | "all" | "future" | "none"; label: string }[];
+  resumesSeries?: boolean;
+  minimumAvailability?: string;
+}
+
+export interface Candidate { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null }
 
 export interface ArrOptions { profiles: { id: number; name: string }[]; roots: { id: number; path: string }[]; tags: { id: number; label: string }[] }
 

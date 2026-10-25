@@ -64,30 +64,25 @@ function isPrivateIp(ip: string) {
   return ip === "::1" || /^f[cd]/i.test(ip) || /^fe80:/i.test(ip);
 }
 
-const FORWARD_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+const FORWARD_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-server", "x-client-ip", "via"];
 
 /**
  * "Disabled for local addresses": the request must come from a private IP, and must not have passed through
  * an untrusted proxy (a reverse proxy or tunnel would otherwise make the whole internet look local).
  */
-function isLocalRequest(req: FastifyRequest) {
+export function isLocalRequest(req: FastifyRequest) {
   if (!PROXY_TRUSTED && FORWARD_HEADERS.some((h) => req.headers[h])) return false;
   return isPrivateIp(req.ip);
 }
 
-/** Guards against DNS rebinding: a local bypass only counts when the browser addressed us by IP or a LAN name. */
-function hostAllowed(req: FastifyRequest) {
+/**
+ * Guards against DNS rebinding: a local bypass only counts when the browser addressed us by IP or a LAN name.
+ * The public externalUrl deliberately does NOT qualify: requests for it usually came through a proxy.
+ */
+export function hostAllowed(req: FastifyRequest) {
   const host = (req.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "").toLowerCase();
   if (!host) return false;
   if (net.isIP(host) || host === "localhost" || !host.includes(".") || host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".home.arpa")) return true;
-  const ext = getSettings().externalUrl;
-  if (ext) {
-    try {
-      if (new URL(ext).hostname.toLowerCase() === host) return true;
-    } catch {
-      /* ignore bad externalUrl */
-    }
-  }
   return (process.env.TASTEARR_ALLOWED_HOSTS ?? "").split(",").map((x) => x.trim().toLowerCase()).includes(host);
 }
 
@@ -127,18 +122,24 @@ export async function guard(req: FastifyRequest, reply: FastifyReply) {
   if (st.via !== "apikey" && !csrfOk(req)) return reply.code(403).send({ error: "Cross-site request blocked" });
 }
 
-// Simple in-memory login throttle: 10 attempts per 5 minutes per IP.
-const attempts = new Map<string, { n: number; reset: number }>();
-export function loginAllowed(ip: string) {
+// In-memory login throttle per IP + username, with growing back-off instead of a hard lock-out.
+const attempts = new Map<string, { n: number; until: number; seen: number }>();
+export function loginAllowed(ip: string, user: string) {
   const now = Date.now();
-  const a = attempts.get(ip);
-  if (!a || a.reset < now) {
-    attempts.set(ip, { n: 1, reset: now + 5 * 60_000 });
-    return true;
-  }
+  for (const [k, v] of attempts) if (now - v.seen > 30 * 60_000) attempts.delete(k);
+  const key = `${ip}|${user.toLowerCase()}`;
+  const a = attempts.get(key) ?? { n: 0, until: 0, seen: now };
+  if (a.until > now) return false;
   a.n++;
-  return a.n <= 10;
+  a.seen = now;
+  // 5 free tries, then 2s, 4s, 8s ... capped at 5 minutes.
+  if (a.n > 5) a.until = now + Math.min(300_000, 1000 * 2 ** (a.n - 5));
+  attempts.set(key, a);
+  return true;
 }
-export function loginSucceeded(ip: string) {
-  attempts.delete(ip);
+export function loginSucceeded(ip: string, user: string) {
+  attempts.delete(`${ip}|${user.toLowerCase()}`);
 }
+
+/** One-time token for claiming a fresh install from outside the local network; printed to the container log. */
+export const SETUP_TOKEN = crypto.randomBytes(6).toString("hex");

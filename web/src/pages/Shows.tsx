@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Followed, type Show, type Status } from "../api";
-import { airLabel, Spinner, usePageTitle, useToast } from "../ui";
+import { airLabel, ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
 
 export function Shows({ status }: { status: Status }) {
   usePageTitle("My Shows");
@@ -8,12 +8,16 @@ export function Shows({ status }: { status: Status }) {
   const [data, setData] = useState<{ sonarr: Show[]; following: Followed[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [q, setQ] = useState("");
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
+    setError(null);
     api<{ sonarr: Show[]; following: Followed[] }>("/shows").then(setData).catch((e) => setError(e.message));
-  }, []);
+  }, [reload]);
 
   async function toggle(s: Show) {
+    if (!s.dropped && !confirm(`Stop following ${s.title}? You won't get alerts for it${status.sonarr ? ", and Sonarr may stop downloading it (Settings decides)" : ""}. You can turn it back on later.`)) return;
     setBusy(s.tvdbId);
     try {
       const r = await api<{ dropped: boolean; monitored: boolean | null }>(`/shows/${s.tvdbId}/${s.dropped ? "undrop" : "drop"}`, { body: {} });
@@ -35,19 +39,25 @@ export function Shows({ status }: { status: Status }) {
     }
   }
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <ErrorBox error={error} retry={() => setReload((x) => x + 1)} />;
   if (!data) return <Spinner label="Loading your shows…" />;
+  const match = (t: string) => !q || t.toLowerCase().includes(q.toLowerCase());
+  const sonarr = data.sonarr.filter((s) => match(s.title));
+  const following = data.following.filter((f) => match(f.title));
 
   return (
     <section>
-      <h1>My shows</h1>
+      <div className="toolbar">
+        <h1>My shows</h1>
+        {data.sonarr.length + data.following.length > 6 && <input className="search" type="search" placeholder="Search my shows" aria-label="Search my shows" value={q} onChange={(e) => setQ(e.target.value)} />}
+      </div>
       {status.sonarr && (
         <>
-          <h2>Airing in Sonarr</h2>
-          <p className="muted small">"Not into it" stops alerts, teaches your taste profile, and (if set in Settings) unmonitors the show in Sonarr.</p>
-          {!data.sonarr.length && <p className="muted">No airing anime in Sonarr.</p>}
+          <h2>Airing now, in Sonarr</h2>
+          <p className="muted small">Lost interest? "Not into it" stops alerts for the show and teaches Tastearr. Settings decides whether Sonarr also stops downloading it.</p>
+          {!sonarr.length && <p className="muted">{q ? "No matches." : "No airing anime in Sonarr."}</p>}
           <div className="show-list">
-            {data.sonarr.map((s) => (
+            {sonarr.map((s) => (
               <div key={s.tvdbId} className={`show-row card${s.dropped ? " dim" : ""}`}>
                 {s.poster ? <img src={s.poster} alt="" loading="lazy" /> : <div className="noimg" />}
                 <div className="body">
@@ -63,8 +73,8 @@ export function Shows({ status }: { status: Status }) {
                     </div>
                   ) : null}
                 </div>
-                <button className={s.dropped ? "ghost" : "danger"} disabled={busy === s.tvdbId} onClick={() => toggle(s)}>
-                  {s.dropped ? "Back on" : "Not into it"}
+                <button className={s.dropped ? "ghost small" : "ghost small danger-text"} disabled={busy === s.tvdbId} onClick={() => toggle(s)}>
+                  {s.dropped ? "Turn back on" : "Not into it"}
                 </button>
               </div>
             ))}
@@ -74,9 +84,9 @@ export function Shows({ status }: { status: Status }) {
 
       <h2>Following</h2>
       <p className="muted small">Shows you follow from Picks. You get an alert when each episode airs, with where to stream it.</p>
-      {!data.following.length && <p className="muted">Not following anything yet. Press Follow on a pick.</p>}
+      {!following.length && <p className="muted">{q ? "No matches." : "Not following anything yet. Press Follow on a pick."}</p>}
       <div className="show-list">
-        {data.following.map((f) => (
+        {following.map((f) => (
           <div key={f.id} className="show-row card">
             {f.cover ? <img src={f.cover} alt="" loading="lazy" /> : <div className="noimg" />}
             <div className="body">
@@ -94,7 +104,7 @@ export function Shows({ status }: { status: Status }) {
                 ))}
               </div>
             </div>
-            <button className="ghost" onClick={() => unfollow(f)}>
+            <button className="ghost small" onClick={() => unfollow(f)}>
               Unfollow
             </button>
           </div>

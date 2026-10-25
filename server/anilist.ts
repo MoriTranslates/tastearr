@@ -12,6 +12,8 @@ export interface Media {
   status: string | null;
   source: string | null;
   episodes: number | null;
+  /** Minutes per episode. */
+  duration: number | null;
   season: Season | null;
   seasonYear: number | null;
   startDate: { year: number | null; month: number | null; day: number | null };
@@ -32,9 +34,9 @@ export interface Media {
 }
 
 /** Bump when FIELDS changes so cached rows are refetched. */
-export const MEDIA_SCHEMA = 2;
+export const MEDIA_SCHEMA = 3;
 
-const FIELDS = `id title { romaji english native } format status source episodes season seasonYear startDate { year month day }
+const FIELDS = `id title { romaji english native } format status source episodes duration season seasonYear startDate { year month day }
   countryOfOrigin isAdult popularity averageScore genres tags { name rank isGeneralSpoiler isMediaSpoiler }
   coverImage { large color } description(asHtml: false) siteUrl studios(isMain: true) { nodes { name } }
   relations { edges { relationType node { id type format } } }
@@ -126,6 +128,8 @@ export async function getSeason(season: Season, year: number, force = false): Pr
   }
   const unique = [...new Map(all.map((m) => [m.id, m])).values()];
   store(unique, season, year);
+  // Shows AniList moved out of this season (or deleted) must not keep the old tag, or the cache never validates.
+  if (unique.length) db.prepare(`UPDATE media SET season = NULL, year = NULL WHERE season = ? AND year = ? AND id NOT IN (${unique.map(() => "?").join(",")})`).run(season, year, ...unique.map((m) => m.id));
   db.prepare("INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at").run(season, year, Date.now());
   return unique;
 }
@@ -156,6 +160,16 @@ export function cachedMedia(id: number): Media | null {
   return r ? parse(r.data) : null;
 }
 
+/** Title search, for the quiz's "add a show you've seen". */
+export async function searchTitle(q: string): Promise<Media[]> {
+  const d = await gql<PageResult>(
+    `query ($q: String) { Page(perPage: 8) { pageInfo { hasNextPage } media(search: $q, type: ANIME, isAdult: false, sort: SEARCH_MATCH) { ${FIELDS} } } }`,
+    { q },
+  );
+  store(d.Page.media, null, null);
+  return d.Page.media;
+}
+
 /** Popular shows matching a filter, used for quiz archetype slots. */
 export async function searchPopular(filter: { genre_in?: string[]; tag_in?: string[]; source?: string; startBefore?: number }, perPage = 12): Promise<Media[]> {
   const d = await gql<PageResult>(
@@ -184,15 +198,23 @@ export async function anilistUserList(userName: string): Promise<ListEntry[]> {
 export async function airedBetween(ids: number[], from: number, to: number) {
   const out: { mediaId: number; episode: number; airingAt: number }[] = [];
   for (let i = 0; i < ids.length; i += 50) {
-    const d = await gql<{ Page: { airingSchedules: { mediaId: number; episode: number; airingAt: number }[] } }>(
-      `query ($ids: [Int], $from: Int, $to: Int) { Page(perPage: 50) { airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) { mediaId episode airingAt } } }`,
-      { ids: ids.slice(i, i + 50), from, to },
-    );
-    out.push(...d.Page.airingSchedules);
+    for (let page = 1; page <= 10; page++) {
+      const d = await gql<{ Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: { mediaId: number; episode: number; airingAt: number }[] } }>(
+        `query ($ids: [Int], $from: Int, $to: Int, $page: Int) { Page(page: $page, perPage: 50) { pageInfo { hasNextPage } airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) { mediaId episode airingAt } } }`,
+        { ids: ids.slice(i, i + 50), from, to, page },
+      );
+      out.push(...d.Page.airingSchedules);
+      if (!d.Page.pageInfo.hasNextPage) break;
+    }
   }
   return out;
 }
 
-export function allGenres(): string[] {
-  return ["Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
+/** AniList genres with a plain-English hint for people new to anime terms. */
+export function allGenres(): { key: string; label: string }[] {
+  return [
+    ["Action", ""], ["Adventure", ""], ["Comedy", ""], ["Drama", ""], ["Ecchi", "fan service, sexy"], ["Fantasy", ""], ["Horror", ""],
+    ["Mahou Shoujo", "magical girls"], ["Mecha", "giant robots"], ["Music", ""], ["Mystery", ""], ["Psychological", ""], ["Romance", ""],
+    ["Sci-Fi", ""], ["Slice of Life", "everyday life"], ["Sports", ""], ["Supernatural", ""], ["Thriller", ""],
+  ].map(([key, hint]) => ({ key, label: hint ? `${key} (${hint})` : key }));
 }

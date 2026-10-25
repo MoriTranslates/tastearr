@@ -39,8 +39,10 @@ export interface Settings {
   };
   lists: { anilistUser: string; malUser: string; malClientId: string };
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
-  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean };
+  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
   display: { titleLanguage: "english" | "romaji" | "native" };
+  /** How the user watches: "server" (Sonarr/Plex) or "stream" (Crunchyroll etc.). Shapes the setup guide and wording. */
+  mode: "server" | "stream" | "";
   /** Quiz genre answers. "never" genres are excluded outright. */
   genrePrefs: Record<string, Pref>;
   notify: {
@@ -57,6 +59,8 @@ export interface Settings {
     episodeAlerts: boolean;
     /** "Episode N is out" alerts for followed shows, from AniList's airing schedule (no Sonarr needed). */
     airingAlerts: boolean;
+    /** Minutes after the Japanese broadcast before a followed show's alert fires (simulcasts land later). */
+    airingDelayMin: number;
   };
   /** Address phones and browsers reach Tastearr at (reverse proxy URL). Used for alert buttons and the Host check. */
   externalUrl: string;
@@ -77,10 +81,11 @@ const DEFAULTS: Settings = {
   media: { type: "none", url: "", token: "", userId: "", libraryIds: [] },
   lists: { anilistUser: "", malUser: "", malClientId: "" },
   training: { seasons: 8, minTagRank: 60, formats: ["TV", "TV_SHORT", "ONA"], countries: ["JP"] },
-  filters: { excludeGenres: [], excludeTags: ["Kids"], hideInLibrary: false, hideShorts: false },
+  filters: { excludeGenres: [], excludeTags: ["Kids"], hideInLibrary: false, hideShorts: false, noGore: false },
   display: { titleLanguage: "english" },
+  mode: "",
   genrePrefs: {},
-  notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true, airingAlerts: true },
+  notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true, airingAlerts: true, airingDelayMin: 60 },
   externalUrl: "",
   auth: { username: "", passwordHash: "", bypassLocal: false },
   apiKey: "",
@@ -91,15 +96,24 @@ const DEFAULTS: Settings = {
 
 const SECRET_PATHS = ["sonarr.apiKey", "radarr.apiKey", "media.token", "notify.discordWebhook", "notify.ntfyToken", "notify.gotifyToken", "lists.malClientId"] as const;
 /** Settings the browser may change through PUT /api/settings. Everything else has its own endpoint. */
-const EDITABLE = ["sonarr", "radarr", "media", "lists", "training", "filters", "display", "notify", "externalUrl", "auth.username", "auth.bypassLocal"];
+const EDITABLE = ["sonarr", "radarr", "media", "lists", "training", "filters", "display", "notify", "externalUrl", "mode"];
+/** Each secret is only valid for the address it was saved with: if the address changes, a masked secret is dropped. */
+const SECRET_FOR_URL: [string, string][] = [
+  ["sonarr.url", "sonarr.apiKey"],
+  ["radarr.url", "radarr.apiKey"],
+  ["media.url", "media.token"],
+  ["notify.ntfyUrl", "notify.ntfyToken"],
+  ["notify.gotifyUrl", "notify.gotifyToken"],
+];
 const ENUMS: Record<string, readonly string[]> = {
   "sonarr.sequelMonitor": ["newSeason", "all"],
   "sonarr.dropAction": ["unmonitor", "keep"],
   "media.type": ["none", "plex", "jellyfin"],
   "radarr.minimumAvailability": ["announced", "inCinemas", "released"],
   "display.titleLanguage": ["english", "romaji", "native"],
+  mode: ["server", "stream", ""],
 };
-const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30] };
+const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30], "notify.airingDelayMin": [0, 1440] };
 
 export const MASK = "••••••••";
 /** True for the mask (or a mangled copy of it); real keys are printable ASCII. */
@@ -211,11 +225,30 @@ export function updateSettings(patch: unknown) {
   const next = merge(cur, allowed) as Settings;
   for (const p of SECRET_PATHS) if (isMasked(getPath(next, p))) setPath(next as unknown as Record<string, unknown>, p, getPath(cur, p));
   next.sonarr.url = next.sonarr.url.replace(/\/+$/, "");
-  next.media.url = next.media.url.replace(/\/+$/, "");
   next.radarr.url = next.radarr.url.replace(/\/+$/, "");
+  next.media.url = next.media.url.replace(/\/+$/, "");
+  next.notify.ntfyUrl = normaliseNtfy(next.notify.ntfyUrl);
+  for (const [u, k] of SECRET_FOR_URL) {
+    const submitted = getPath(allowed, k);
+    const keptOld = submitted === undefined || isMasked(submitted);
+    if (keptOld && getPath(next, u) !== getPath(cur, u)) setPath(next as unknown as Record<string, unknown>, k, "");
+  }
   next.externalUrl = next.externalUrl.replace(/\/+$/, "");
   write(next);
   return next;
+}
+
+/** "my-topic" or "ntfy.sh/my-topic" -> "https://ntfy.sh/my-topic". */
+function normaliseNtfy(v: string) {
+  const t = v.trim();
+  if (!t) return "";
+  if (/^https?:\/\//i.test(t)) return t.replace(/\/+$/, "");
+  if (t.includes("/")) return `https://${t.replace(/\/+$/, "")}`;
+  return `https://ntfy.sh/${t}`;
+}
+
+export function setBypassLocal(on: boolean) {
+  write({ ...getSettings(), auth: { ...getSettings().auth, bypassLocal: on } });
 }
 
 /** Internal update that skips sanitising (server-side values such as an auto-detected key or a Plex token). */
@@ -248,8 +281,9 @@ export async function setAccount(username: string, password: string) {
 export async function checkPassword(pw: string, stored: string) {
   const [salt, hash] = stored.split(":");
   if (!salt || !hash) return false;
+  const want = Buffer.from(hash, "hex");
   const got = await scrypt(pw, Buffer.from(salt, "hex"), 32);
-  return crypto.timingSafeEqual(got, Buffer.from(hash, "hex"));
+  return want.length === got.length && crypto.timingSafeEqual(got, want);
 }
 
 export function safeEqual(a: string | undefined, b: string) {

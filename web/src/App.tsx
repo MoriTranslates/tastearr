@@ -23,9 +23,9 @@ export function navigate(path: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-export function Link({ to, children, className }: { to: string; children: React.ReactNode; className?: string }) {
+export function Link({ to, children, className, current }: { to: string; children: React.ReactNode; className?: string; current?: boolean }) {
   return (
-    <a href={to} className={className} onClick={(e) => (e.preventDefault(), navigate(to))}>
+    <a href={to} className={className} aria-current={current ? "page" : undefined} onClick={(e) => (e.preventDefault(), navigate(to))}>
       {children}
     </a>
   );
@@ -88,7 +88,7 @@ export function App() {
           </Link>
           <nav className="topnav" aria-label="Main">
             {NAV.map((n) => (
-              <Link key={n.path} to={n.path} className={n.path === page ? "active" : ""}>
+              <Link key={n.path} to={n.path} className={n.path === page ? "active" : ""} current={n.path === page}>
                 {n.label}
               </Link>
             ))}
@@ -108,7 +108,7 @@ export function App() {
         </footer>
         <nav className="tabbar" aria-label="Main">
           {NAV.map((n) => (
-            <Link key={n.path} to={n.path} className={n.path === page ? "active" : ""}>
+            <Link key={n.path} to={n.path} className={n.path === page ? "active" : ""} current={n.path === page}>
               <span aria-hidden="true">{n.icon}</span>
               {n.label}
             </Link>

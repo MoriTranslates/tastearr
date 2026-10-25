@@ -2,10 +2,11 @@ import { db, droppedSet } from "./db.js";
 import { getMediaByIds } from "./anilist.js";
 import { signAction } from "./auth.js";
 import { anilistIdsForTvdb, mappingTables } from "./mapping.js";
-import { watchStates } from "./mediaserver.js";
+
 import { send } from "./notify.js";
 import { getSettings } from "./settings.js";
 import { sonarrSeries, setMonitored } from "./sonarr.js";
+import { cachedWatch } from "./taste.js";
 
 /** "Not into it anymore": remembered for the taste model, mutes alerts, optionally unmonitors in Sonarr. */
 export async function dropShow(tvdbId: number) {
@@ -34,7 +35,7 @@ async function posterFor(tvdbId: number) {
 
 /** Continuing anime in Sonarr with watch progress, for the My Shows page. */
 export async function myShows() {
-  const [series, watch] = await Promise.all([sonarrSeries(true), watchStates().catch(() => new Map())]);
+  const [series, watch] = await Promise.all([sonarrSeries(true), cachedWatch().catch(() => new Map())]);
   const dropped = droppedSet();
   return series
     .filter((s) => s.seriesType === "anime" && (s.status === "continuing" || s.status === "upcoming" || dropped.has(s.tvdbId)))
@@ -67,8 +68,10 @@ interface SonarrWebhook {
 const code = (e: { seasonNumber: number; episodeNumber: number }) => `S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`;
 
 /** Sonarr sends one webhook per imported file; collect them per series for a minute so a batch drop is one alert. */
-const pending = new Map<number, { series: NonNullable<SonarrWebhook["series"]>; episodes: NonNullable<SonarrWebhook["episodes"]>; timer: NodeJS.Timeout }>();
+const pending = new Map<number, { series: NonNullable<SonarrWebhook["series"]>; episodes: NonNullable<SonarrWebhook["episodes"]>; timer: NodeJS.Timeout; first: number }>();
 const BATCH_MS = 60_000;
+/** A long import backlog still gets its alert within 5 minutes. */
+const MAX_BATCH_MS = 5 * 60_000;
 
 async function flush(tvdbId: number) {
   const p = pending.get(tvdbId);
@@ -121,9 +124,9 @@ export async function handleSonarrWebhook(p: SonarrWebhook) {
   const cur = pending.get(id);
   if (cur) {
     cur.episodes.push(...(p.episodes ?? []));
-    cur.timer.refresh();
+    if (Date.now() - cur.first < MAX_BATCH_MS - BATCH_MS) cur.timer.refresh();
   } else {
-    pending.set(id, { series: p.series, episodes: [...(p.episodes ?? [])], timer: setTimeout(() => void flush(id), BATCH_MS) });
+    pending.set(id, { series: p.series, episodes: [...(p.episodes ?? [])], timer: setTimeout(() => void flush(id), BATCH_MS), first: Date.now() });
   }
   return ["queued"];
 }

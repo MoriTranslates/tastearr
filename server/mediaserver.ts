@@ -1,3 +1,4 @@
+import { mappingTables } from "./mapping.js";
 import { getSettings, type Settings } from "./settings.js";
 
 /** How far the user got through a show, keyed by TVDB id, with per-season detail when available. */
@@ -66,12 +67,14 @@ export async function testMediaServer(conn: MediaConn) {
   throw new Error("No media server selected");
 }
 
-/** TVDB id from the new Plex agent's Guid list, or the legacy TheTVDB / HAMA agent guid. */
-function plexTvdb(s: { guid?: string; Guid?: { id: string }[] }) {
+/** TVDB id from the new Plex agent's Guid list, the legacy TheTVDB agent, or HAMA (tvdb-N or anidb-N). */
+function plexTvdb(s: { guid?: string; Guid?: { id: string }[] }, tvdbByAnidb: Map<number, number>) {
   const fromList = s.Guid?.find((g) => g.id.startsWith("tvdb://"))?.id.slice(7);
   if (fromList) return Number(fromList);
-  const legacy = s.guid?.match(/(?:thetvdb:\/\/|tvdb-)(\d+)/);
-  return legacy ? Number(legacy[1]) : 0;
+  const legacy = s.guid?.match(/(?:thetvdb:\/\/|tvdb\d?-)(\d+)/);
+  if (legacy) return Number(legacy[1]);
+  const anidb = s.guid?.match(/anidb\d?-(\d+)/);
+  return anidb ? (tvdbByAnidb.get(Number(anidb[1])) ?? 0) : 0;
 }
 
 export async function watchStates(): Promise<Map<number, WatchState>> {
@@ -81,11 +84,12 @@ export async function watchStates(): Promise<Map<number, WatchState>> {
   const libs = conn.libraryIds.length ? conn.libraryIds : (await listLibraries(conn)).map((l) => l.id);
 
   if (conn.type === "plex") {
+    const { tvdbByAnidb } = await mappingTables();
     type PlexShow = { ratingKey: string; title: string; guid?: string; Guid?: { id: string }[]; leafCount?: number; viewedLeafCount?: number; userRating?: number };
     for (const lib of libs) {
       const d = await plexGet<{ Metadata?: PlexShow[] }>(conn, `/library/sections/${encodeURIComponent(lib)}/all?type=2&includeGuids=1`);
       for (const s of d.Metadata ?? []) {
-        const tvdb = plexTvdb(s);
+        const tvdb = plexTvdb(s, tvdbByAnidb);
         if (!tvdb) continue;
         const state: WatchState = { title: s.title, watched: s.viewedLeafCount ?? 0, total: s.leafCount ?? 0, seasons: new Map(), rating: s.userRating ?? null };
         // Per-season detail only for shows with some progress (one request each).

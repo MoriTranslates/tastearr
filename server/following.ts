@@ -2,7 +2,7 @@ import { db } from "./db.js";
 import { airedBetween, getMediaByIds, type Media } from "./anilist.js";
 import { send } from "./notify.js";
 import { getSettings } from "./settings.js";
-import { setFeedback, title } from "./taste.js";
+import { setFeedback, streamingLinks, title } from "./taste.js";
 
 /**
  * Follow list for people who watch on streaming services instead of (or as well as) running Sonarr.
@@ -40,16 +40,18 @@ export async function followedShows() {
     status: m.status,
     episodes: m.episodes,
     nextAiring: m.nextAiringEpisode ? { at: m.nextAiringEpisode.airingAt * 1000, episode: m.nextAiringEpisode.episode } : null,
-    streaming: (m.externalLinks ?? []).filter((l) => l.type === "STREAMING").map((l) => ({ site: l.site, url: l.url })),
+    streaming: streamingLinks(m),
   }));
 }
 
 /** Announces newly aired episodes of followed shows. Runs hourly; looks back 2 days so nothing is missed. */
 export async function announceAired() {
-  if (!getSettings().notify.airingAlerts) return 0;
+  const n = getSettings().notify;
+  if (!n.airingAlerts) return 0;
   const ids = followedIds();
   if (!ids.length) return 0;
-  const now = Math.floor(Date.now() / 1000);
+  // Simulcasts usually land a little after the Japanese broadcast; wait before saying "it's out".
+  const now = Math.floor(Date.now() / 1000) - n.airingDelayMin * 60;
   const aired = await airedBetween(ids, now - 2 * 86400, now);
   const seen = db.prepare("SELECT 1 FROM aired_notified WHERE anilist_id = ? AND episode = ?");
   const fresh = aired.filter((a) => !seen.get(a.mediaId, a.episode));
@@ -58,14 +60,20 @@ export async function announceAired() {
   for (const a of fresh) {
     const m = media.get(a.mediaId);
     if (!m) continue;
-    const where = (m.externalLinks ?? []).filter((l) => l.type === "STREAMING");
-    await send({
-      title: `${title(m)}: episode ${a.episode} is out`,
-      body: where.length ? `Watch on ${where.map((l) => l.site).join(", ")}.` : "It just aired.",
-      url: where[0]?.url ?? m.siteUrl,
-      image: m.coverImage.large,
-    }).catch((e) => console.warn("Airing alert failed:", (e as Error).message));
-    db.prepare("INSERT OR IGNORE INTO aired_notified (anilist_id, episode) VALUES (?, ?)").run(a.mediaId, a.episode);
+    const where = [...new Set((m.externalLinks ?? []).filter((l) => l.type === "STREAMING").map((l) => l.site.replace(/^Amazon Prime Video$/, "Prime Video")))];
+    const firstUrl = (m.externalLinks ?? []).find((l) => l.type === "STREAMING")?.url;
+    try {
+      const sent = await send({
+        title: `${title(m)}: episode ${a.episode} is out`,
+        body: where.length ? `Aired in Japan. Usually on ${where.slice(0, 3).join(", ")} soon after.` : "It just aired in Japan.",
+        url: firstUrl ?? m.siteUrl,
+        image: m.coverImage.large,
+      });
+      // Only remember it as announced once an alert actually went out, so an ntfy outage doesn't lose it.
+      if (sent.length) db.prepare("INSERT OR IGNORE INTO aired_notified (anilist_id, episode) VALUES (?, ?)").run(a.mediaId, a.episode);
+    } catch (e) {
+      console.warn("Airing alert failed, will retry:", (e as Error).message);
+    }
   }
   return fresh.length;
 }

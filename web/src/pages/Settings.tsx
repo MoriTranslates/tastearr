@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, store, type Settings as S, type Status } from "../api";
 import { Link } from "../App";
 import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, useSettings } from "../connections";
-import { ListInput, NumberInput, SecretInput, usePageTitle, useToast } from "../ui";
+import { ErrorBox, ListInput, NumberInput, SecretInput, usePageTitle, useToast } from "../ui";
 
 const TABS = [
   { id: "connections", label: "Connections" },
@@ -24,7 +24,7 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
     return r;
   };
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <ErrorBox error={error} retry={() => location.reload()} />;
   if (!s) return <p className="muted">Loading settings…</p>;
 
   return (
@@ -69,8 +69,10 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
     setBusy(true);
     try {
       await save({ filters, training, display });
-      await api("/profile/rebuild", { body: {} });
-      toast("Saved. Rebuilding your taste profile…");
+      if (JSON.stringify(training) !== JSON.stringify(s.training)) {
+        await api("/profile/rebuild", { body: {} });
+        toast("Saved. Re-learning your taste (takes a minute)…");
+      } else toast("Saved");
     } catch (e) {
       toast((e as Error).message, true);
     } finally {
@@ -102,10 +104,13 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
           <NumberInput label="Seasons" min={2} max={24} value={training.seasons} onChange={(v) => setTraining({ ...training, seasons: v })} />
         </label>
         <label className="check">
-          <input type="checkbox" checked={filters.hideInLibrary} onChange={(e) => setFilters({ ...filters, hideInLibrary: e.target.checked })} /> Hide shows already in my library by default
+          <input type="checkbox" checked={filters.noGore} onChange={(e) => setFilters({ ...filters, noGore: e.target.checked })} /> Hide shows with gore or graphic violence
         </label>
         <label className="check">
-          <input type="checkbox" checked={filters.hideShorts} onChange={(e) => setFilters({ ...filters, hideShorts: e.target.checked })} /> Hide the Shorts section by default
+          <input type="checkbox" checked={filters.hideInLibrary} onChange={(e) => setFilters({ ...filters, hideInLibrary: e.target.checked })} /> Hide shows I already have, by default
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={filters.hideShorts} onChange={(e) => setFilters({ ...filters, hideShorts: e.target.checked })} /> Fold away the Shorts section by default
         </label>
       </div>
       <p className="muted small">Filters never hide sequels of shows you watch. Your quiz genre answers live on the Quiz page.</p>
@@ -133,7 +138,7 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
 
   async function saveMode() {
     try {
-      await save({ auth: { ...s.auth, bypassLocal: bypass } });
+      await api("/auth/mode", { method: "PUT", body: { bypassLocal: bypass } });
       toast("Saved");
     } catch (e) {
       toast((e as Error).message, true);
@@ -167,19 +172,19 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
   return (
     <>
       <div className="card pad stack">
-        <h2>Authentication</h2>
+        <h2>Login</h2>
         <div className="form">
           <label>
-            Authentication required
+            Ask for the password
             <select value={bypass ? "local" : "enabled"} onChange={(e) => setBypass(e.target.value === "local")}>
-              <option value="enabled">Enabled</option>
-              <option value="local">Disabled for local addresses</option>
+              <option value="enabled">Always</option>
+              <option value="local">Not when I'm on my home network</option>
             </select>
           </label>
         </div>
         <p className="muted small">
-          "Disabled for local addresses" skips the login for devices on your home network. Requests through a reverse proxy or tunnel always need the login, unless you set{" "}
-          <code>TRUST_PROXY</code> to your proxy's address.
+          Same as Sonarr's "Authentication Required: Disabled for Local Addresses". Visits through a reverse proxy or tunnel always need the password unless you set{" "}
+          <code>TRUST_PROXY</code> to your proxy's address. Changing this needs a password login, not the home-network shortcut.
         </p>
         <div className="row end">
           <button className="primary" onClick={saveMode}>
@@ -222,7 +227,12 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
           <label className="wide">
             API key (X-Api-Key header, full access)
             {keys?.apiKey ? (
-              <SecretInput label="API key" value={keys.apiKey} onChange={() => undefined} />
+              <span className="row">
+                <SecretInput label="API key" value={keys.apiKey} onChange={() => undefined} readOnly />
+                <button className="ghost small" onClick={() => navigator.clipboard?.writeText(keys.apiKey!).then(() => toast("Copied"))}>
+                  Copy
+                </button>
+              </span>
             ) : (
               <span className="muted small">Log in with your password to see it (hidden when using the local-network bypass).</span>
             )}
