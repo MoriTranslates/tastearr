@@ -109,7 +109,7 @@ export function App() {
           {page === "system" && <System />}
         </main>
         <footer className="foot">
-          Tastearr v{status.version} · data from <a href="https://anilist.co">AniList</a> · <Link to="/system">System</Link> · GPL-3.0
+          Tastearr v{status.version} · data from <a href="https://anilist.co">AniList</a> · <Link to="/system">System</Link> · <a href="https://ko-fi.com/moritranslates" target="_blank" rel="noreferrer">Support ♥</a> · GPL-3.0
         </footer>
         <nav className="tabbar" aria-label="Main">
           {NAV.map((n) => (

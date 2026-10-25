@@ -4,6 +4,11 @@
 
 **Anime season picks that know what you actually watch.** Tastearr learns your taste from your library, your watch history and your AniList/MAL list, then ranks every show in the new season for you. Add the ones you want to Sonarr or Radarr, or follow them and get an alert when each episode is out, with a link to where it streams.
 
+<p align="center">
+  <i>Built solo with Claude Code. If Tastearr finds you a show you love, consider supporting development:</i><br><br>
+  <a href="https://ko-fi.com/moritranslates"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support on Ko-fi"></a>
+</p>
+
 - **Season picks, laid out like AniChart.** Shows are split into **Continuing**, **New**, **Shorts** and **Movies**. Each has a match score and the reason for it ("Continues Black Clover", "Isekai · Female Harem · like Hell Mode"). You can sort by match, popularity, AniList score, air time or title.
 - **Weekly schedule.** Shows are laid out Monday to Sunday in your time zone, with how many you already follow each day. **Quiet days** come with the best picks airing then. Filter by day ("Monday shows") or by streaming service, and save **your services** (Crunchyroll, Netflix, HIDIVE…) once in Settings.
 - **Sequel-aware.** A new season of something you finished goes straight to the top. A sequel to something you dropped is pushed down.
@@ -129,6 +134,10 @@ Requires Node 22.13+ (uses the built-in `node:sqlite`).
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what's next and what was considered and left out on purpose.
+
+## Support
+
+Tastearr is free and open source. If it's useful to you, you can support development on [Ko-fi](https://ko-fi.com/moritranslates).
 
 ## License
 
