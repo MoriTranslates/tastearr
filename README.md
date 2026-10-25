@@ -9,6 +9,12 @@
   <a href="https://ko-fi.com/moritranslates"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support on Ko-fi"></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/picks.png" width="820" alt="Season picks with match scores and reasons"><br>
+  <img src="docs/screenshots/schedule.png" width="405" alt="Weekly schedule with streaming links">
+  <img src="docs/screenshots/add-preview.png" width="405" alt="Add-to-Sonarr preview">
+</p>
+
 - **Season picks, laid out like AniChart.** Shows are split into **Continuing**, **New**, **Shorts** and **Movies**. Each has a match score and the reason for it ("Continues Black Clover", "Isekai · Female Harem · like Hell Mode"). You can sort by match, popularity, AniList score, air time or title.
 - **Weekly schedule.** Shows are laid out Monday to Sunday in your time zone, with how many you already follow each day. **Quiet days** come with the best picks airing then. Filter by day ("Monday shows") or by streaming service, and save **your services** (Crunchyroll, Netflix, HIDIVE…) once in Settings.
 - **Sequel-aware.** A new season of something you finished goes straight to the top. A sequel to something you dropped is pushed down.
