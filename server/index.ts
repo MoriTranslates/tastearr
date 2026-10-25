@@ -7,6 +7,7 @@ import fastifyStatic from "@fastify/static";
 import { cachedMedia, getMediaByIds, searchTitle, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
 import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, isPrivateIp, loginAllowed, loginSucceeded, makeSession, PROXY_TRUSTED, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
 import { CONFIG_DIR, db, listJobs, setJob } from "./db.js";
+import { autoAddCandidates, autoAddHistory, firstOfMany, runAutoAdd } from "./autoadd.js";
 import { discover, useDiscovered } from "./discover.js";
 import { announceAired, follow, followedIds, followedShows, unfollow } from "./following.js";
 import { refreshLists } from "./lists.js";
@@ -85,16 +86,6 @@ async function guessSeason(m: { title: { english: string | null; romaji: string 
   return null;
 }
 
-/** Long-runners that TVDB files as one big "season 1" (several AniList entries map there): never grab it all. */
-async function firstOfMany(map: { tvdbId: number; season: number | null }) {
-  if (map.season !== 1) return false;
-  const t = await mappingTables();
-  const ids = (t.byTvdb.get(map.tvdbId) ?? []).filter((x) => t.byAnilist.get(x)?.season === 1);
-  if (ids.length < 2) return false;
-  const media = await getMediaByIds(ids);
-  const years = media.map((x) => x.seasonYear ?? x.startDate?.year ?? 0).filter(Boolean);
-  return media.some((x) => (x.episodes ?? 0) > 50) || (years.length > 1 && Math.max(...years) - Math.min(...years) >= 3);
-}
 
 /** A stored secret is only re-used for the URL it was saved with, so it can't be sent somewhere new. */
 function withSecret(url: unknown, secret: unknown, storedUrl: string, storedSecret: string) {
@@ -520,6 +511,20 @@ app.post<{ Body: { id: number; verdict: string | null; source?: string } }>("/ap
   return { ok: true, verdict };
 });
 
+// Auto-add: what it would do now (read-only), what it did, and a "run now".
+app.get("/api/autoadd/preview", async () => {
+  const cur = seasonOf();
+  const out = [];
+  for (const { season, year } of [cur, shiftSeason(cur, 1)])
+    for (const p of await autoAddCandidates(season, year)) out.push({ id: p.id, title: p.title, match: p.match, season, year, action: p.section === "movies" ? "Radarr" : p.autoAction === "monitor" ? `Sonarr, season ${p.tvdbSeason}` : "Sonarr" });
+  return { enabled: getSettings().autoAdd.enabled, picks: out };
+});
+app.get("/api/autoadd/history", async () => autoAddHistory());
+app.post("/api/autoadd/run", async () => {
+  if (!getSettings().autoAdd.enabled) throw fail("Turn auto-add on first");
+  return { added: await runAutoAdd() };
+});
+
 app.post<{ Params: { id: string } }>("/api/picks/:id/follow", async (req) => {
   const r = await follow(id(req.params.id));
   invalidateContext();
@@ -648,6 +653,7 @@ async function tick() {
       await getProfile();
       await recommend(cur.season, cur.year);
       await notifySeason(next.season, next.year);
+      await runAutoAdd();
     }
     setJob("refresh", "done", "Seasons up to date");
   } catch (e) {

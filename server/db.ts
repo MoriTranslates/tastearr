@@ -44,6 +44,8 @@ const MIGRATIONS: string[] = [
    CREATE TABLE IF NOT EXISTS aired_notified (anilist_id INTEGER NOT NULL, episode INTEGER NOT NULL, PRIMARY KEY (anilist_id, episode));`,
   // 4: user-confirmed TVDB matches for shows the community mapping doesn't cover yet
   `CREATE TABLE IF NOT EXISTS mapping_overrides (anilist_id INTEGER PRIMARY KEY, tvdb_id INTEGER NOT NULL, season INTEGER, at INTEGER NOT NULL);`,
+  // 5: shows auto-add sent to Sonarr/Radarr (each at most once, so a removed show never comes back)
+  `CREATE TABLE IF NOT EXISTS auto_added (anilist_id INTEGER PRIMARY KEY, title TEXT NOT NULL, season TEXT NOT NULL, year INTEGER NOT NULL, match INTEGER NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

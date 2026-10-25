@@ -16,6 +16,7 @@
 - **Works without the \*arrs.** No Sonarr? Press **Follow** and use Tastearr as a seasonal tracker that points you to legal streams.
 - **Add with a preview** to Sonarr (as an anime series; for a sequel you don't own it monitors only the new season) or to Radarr for anime movies. You see the profile, folder, tags and what will download before anything is written. New seasons the ID list hasn't matched yet are matched through the earlier season you own.
 - **Or let Sonarr/Radarr pull.** Prefer no write access? Point a Sonarr/Radarr **Custom List** at Tastearr's import list of the shows you gave 👍 on the Picks page.
+- **Auto-add (optional, off by default).** Picks at or above a match % you choose go to Sonarr/Radarr by themselves, with a per-season cap, a preview of what it would add, and an alert listing what it did. Each show is added at most once.
 - **Several Sonarr instances** (a separate anime or 4K Sonarr) count toward "You have this".
 - **Phone alerts** through [ntfy](https://ntfy.sh), Gotify or Discord:
   - when Sonarr/Radarr finishes a download;

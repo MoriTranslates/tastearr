@@ -44,6 +44,8 @@ export interface Settings {
   filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
   /** services: streaming sites the user has; shown first on cards and used as the default Schedule filter. */
   display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
+  /** Picks at or above minMatch go to Sonarr/Radarr on their own (off by default). */
+  autoAdd: { enabled: boolean; minMatch: number; newShows: boolean; sequels: boolean; movies: boolean; maxPerSeason: number; search: boolean };
   /** How the user watches: "server" (Sonarr/Plex) or "stream" (Crunchyroll etc.). Shapes the setup guide and wording. */
   mode: "server" | "stream" | "";
   /** Quiz genre answers. "never" genres are excluded outright. */
@@ -87,6 +89,7 @@ const DEFAULTS: Settings = {
   training: { seasons: 8, minTagRank: 60, formats: ["TV", "TV_SHORT", "ONA"], countries: ["JP"] },
   filters: { excludeGenres: [], excludeTags: ["Kids"], hideInLibrary: false, hideShorts: false, noGore: false },
   display: { titleLanguage: "english", services: [] },
+  autoAdd: { enabled: false, minMatch: 85, newShows: true, sequels: true, movies: false, maxPerSeason: 10, search: true },
   mode: "",
   genrePrefs: {},
   notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true, airingAlerts: true, airingDelayMin: 60 },
@@ -100,7 +103,7 @@ const DEFAULTS: Settings = {
 
 const SECRET_PATHS = ["sonarr.apiKey", "radarr.apiKey", "media.token", "notify.discordWebhook", "notify.ntfyToken", "notify.gotifyToken", "lists.malClientId"] as const;
 /** Settings the browser may change through PUT /api/settings. Everything else has its own endpoint. */
-const EDITABLE = ["sonarr", "radarr", "media", "lists", "training", "filters", "display", "notify", "externalUrl", "mode"];
+const EDITABLE = ["sonarr", "radarr", "media", "lists", "training", "filters", "display", "autoAdd", "notify", "externalUrl", "mode"];
 /** Each secret is only valid for the address it was saved with: if the address changes, a masked secret is dropped. */
 const SECRET_FOR_URL: [string, string][] = [
   ["sonarr.url", "sonarr.apiKey"],
@@ -117,7 +120,7 @@ const ENUMS: Record<string, readonly string[]> = {
   "display.titleLanguage": ["english", "romaji", "native"],
   mode: ["server", "stream", ""],
 };
-const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30], "notify.airingDelayMin": [0, 1440] };
+const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30], "notify.airingDelayMin": [0, 1440], "autoAdd.minMatch": [50, 100], "autoAdd.maxPerSeason": [1, 50] };
 
 export const MASK = "••••••••";
 /** True for the mask (or a mangled copy of it); real keys are printable ASCII. */

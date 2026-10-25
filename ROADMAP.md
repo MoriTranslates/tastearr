@@ -47,6 +47,7 @@ Each of these came up in reviews or user tests. They're reasonable but not essen
 - Extra Sonarr instances count for "You have this" and can be monitored; new shows go to the main one.
 - Popularity before a show airs gets a floor, because AniList numbers are tiny until it starts. Training weighs recent seasons more (0.9 per season back).
 - Match % for a show you're watching never reads below 75–90%: the badge and the number shouldn't disagree.
+- Auto-add is off by default and conservative: confident, mapped, non-short picks only; never anything rated down, hidden, seen, watched or followed; each show at most once; a per-season cap; same season-only monitoring as the Add button.
 - "Never" means never: a genre or tag marked never always hides the show (it stays visible under "Show hidden ones", with the reason).
 - Import lists contain only 👍 from the Picks page in the last four months, never quiz answers, so enabling a list can't pull in a back catalogue.
 - Shows with almost no tags before airing borrow tags from their source manga or novel; a low score on such a show reads "Too early to tell".

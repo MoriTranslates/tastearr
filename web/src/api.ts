@@ -148,6 +148,7 @@ export interface Settings {
   filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
   display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
   sonarrExtra: { name: string; url: string; apiKey: string }[];
+  autoAdd: { enabled: boolean; minMatch: number; newShows: boolean; sequels: boolean; movies: boolean; maxPerSeason: number; search: boolean };
   mode: "server" | "stream" | "";
   genrePrefs: Record<string, Pref>;
   notify: { discordWebhook: string; ntfyUrl: string; ntfyToken: string; gotifyUrl: string; gotifyToken: string; picks: number; seasonAlerts: boolean; episodeAlerts: boolean; airingAlerts: boolean; airingDelayMin: number };
