@@ -1,4 +1,4 @@
-<p align="center"><img src="web/public/favicon.svg" width="72" alt="Tastearr"></p>
+<p align="center"><img src="web/public/icon.png" width="96" alt="Tastearr"></p>
 
 # Tastearr
 
