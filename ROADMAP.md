@@ -34,6 +34,10 @@ Each of these came up in reviews or user tests. They're reasonable but not essen
 | Staff, studio and PV embeds on cards; airing countdowns | AniChart-style extras; AniList's own page is one tap away |
 | "New strong match" alerts as pre-air shows gain tags | Needs per-show alert history; the season alert covers the main moment |
 | A separate read-only key for import lists | The webhook key already can't read or change anything else |
+| Keyword "pseudo-tags" from titles and descriptions for pre-air shows with no tags anywhere | Measured as a small gain; must stay out of training to not hurt the main eval |
+| Popularity snapshots at first sight, to evaluate pre-air scoring on real data | The pre-air floor is calibrated by simulation for now |
+| Movie continuations judged by the last TV season watched | Rare; affects a few franchise films |
+| Progress shown during a long first season download | One-time wait per season; the spinner says it can take a minute |
 | Soft "never" (a penalty instead of hiding) | Testers expected "never" to mean never; hidden shows stay reachable under "Show hidden ones" |
 
 ## Decisions

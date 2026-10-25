@@ -27,6 +27,9 @@ async function main() {
   const now = seasonOf();
   const rows: { name: string; n: number; pos: number; auc: number; p20: number; rprec: number }[] = [];
   const all: { score: number; kept: boolean }[] = [];
+  // Guard metric: "actually watched" (Plex/Jellyfin progress, a good rating or list score), so tuning can't drift toward
+  // shows that are downloaded but never watched. Accept a change only if kept improves and this doesn't drop.
+  const watched: { score: number; seen: boolean }[] = [];
   for (let i = SEASONS_BACK; i >= 1; i--) {
     const target = shiftSeason(now, -i);
     const profile = await buildProfile({ until: target, save: false, ctx });
@@ -45,6 +48,7 @@ async function main() {
     const labels = ranked.map((p) => truth.get(p.id) ?? false);
     const pos = labels.filter(Boolean).length;
     ranked.forEach((p, k) => all.push({ score: p.score, kept: labels[k] }));
+    for (const p of ranked) watched.push({ score: p.score, seen: labelOf(p.id, ctx).p >= 1.5 });
     rows.push({
       name: `${target.season} ${target.year}`,
       n: list.length,
@@ -76,6 +80,8 @@ async function main() {
   }
   console.log(`calibration: toMatch a=${a.toFixed(2)} b=${b.toFixed(2)} (set TASTEARR_TUNE ma/mb to try)`);
   console.log(`${"overall".padEnd(14)} ${"".padStart(11)}  ${f(avg("auc"))}  ${f(avg("p20"))}  ${f(avg("rprec"))}`);
+  const seen = watched.filter((x) => x.seen).length;
+  console.log(`watched guard (${seen} watched): AUC ${f(auc(watched.map((x) => x.score), watched.map((x) => x.seen)))}`);
 }
 
 main().then(

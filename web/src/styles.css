@@ -256,10 +256,10 @@ input.search { max-width: 260px; }
   button:not(.linklike), .button, select, button.chip { min-height: 44px; }
   .linklike { padding: 10px 0; margin: -10px 0; }
   a.chip { position: relative; }
-  a.chip::after { content: ""; position: absolute; inset: -8px -2px; }
+  a.chip::after { content: ""; position: absolute; inset: -5px -2px; }
   .toast button, .toast button.icon { min-height: 44px; min-width: 44px; }
   .tabs { flex-wrap: wrap; }
-  .view-label { display: none; }
+  .view-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 .toast button.primary { padding: 6px 16px; }
 .banner.warn { border-color: var(--warn, #d9a400); }

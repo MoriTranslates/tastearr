@@ -70,10 +70,17 @@ const monitorChoice = (v: unknown) => (["season", "all", "future", "none"] as co
  */
 async function guessSeason(m: { title: { english: string | null; romaji: string | null }; relations?: { edges: { relationType: string; node: { id: number } }[] } | null }, tvdbId: number) {
   const splitCour = /part\s*(2|ii)|2nd cour|cour 2/i.test(`${m.title.english} ${m.title.romaji}`);
-  for (const e of m.relations?.edges ?? []) {
-    if (e.relationType !== "PREQUEL") continue;
-    const pm = await mapAnilist(e.node.id);
-    if (pm?.tvdbId === tvdbId && pm.season) return splitCour ? pm.season : pm.season + 1;
+  // Walk back through recap specials/OVAs (TVDB season 0) to the last real season, like the picks do.
+  let ids = (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id);
+  for (let depth = 0; depth < 3 && ids.length; depth++) {
+    const next: number[] = [];
+    for (const pid of ids) {
+      const pm = await mapAnilist(pid);
+      if (pm?.tvdbId === tvdbId && pm.season) return splitCour ? pm.season : pm.season + 1;
+      const [pmedia] = await getMediaByIds([pid]);
+      if (pmedia && pmedia.format !== "TV" && pmedia.format !== "ONA") next.push(...(pmedia.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id));
+    }
+    ids = next;
   }
   return null;
 }
@@ -196,7 +203,10 @@ app.post("/api/auth/logout", async (_req, reply) => {
 
 app.put<{ Body: { currentPassword?: string; username?: string; password?: string } }>("/api/auth/account", async (req, reply) => {
   const a = getSettings().auth;
+  // Same throttle as login: a stolen session cookie shouldn't allow unlimited password guesses.
+  if (!loginAllowed(req.ip, a.username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
   if (!(await checkPassword(String(req.body?.currentPassword ?? ""), a.passwordHash))) throw fail("Current password is wrong", 403);
+  loginSucceeded(req.ip, a.username);
   const username = String(req.body?.username ?? a.username).trim() || a.username;
   const password = String(req.body?.password ?? "");
   if (password && password.length < 8) throw fail("New password must be at least 8 characters");
@@ -389,8 +399,11 @@ app.get("/api/system/health", async () => {
 
 /** A copy of the database (settings, keys, taste data). It contains every secret, so it asks for the password again. */
 app.post<{ Body: { password?: string } }>("/api/system/backup", async (req, reply) => {
-  if (authState(req).via !== "session") throw fail("Log in with your password to download a backup", 403);
+  // The password itself authorises this (so home-network-bypass users can back up too); the admin key alone can't.
+  if (authState(req).via === "apikey") throw fail("Backups need the account password", 403);
+  if (!loginAllowed(req.ip, getSettings().auth.username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
   if (!(await checkPassword(String(req.body?.password ?? ""), getSettings().auth.passwordHash))) throw fail("Wrong password", 403);
+  loginSucceeded(req.ip, getSettings().auth.username);
   const tmp = path.join(CONFIG_DIR, `backup-${Date.now()}.db`);
   let data: Buffer;
   try {
@@ -467,9 +480,13 @@ app.post<{ Params: { id: string }; Body: { monitor?: string; search?: boolean; t
     const current = await mapAnilist(anilistId);
     const cands = current?.tvdbId === tvdbId ? [] : await lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
     if (current?.tvdbId !== tvdbId && !cands.some((c) => c.tvdbId === tvdbId)) throw fail("That isn't one of Sonarr's matches for this show", 422);
-    const season = req.body.season ? Number(req.body.season) || null : await guessSeason(m, tvdbId);
+    const asked = Number(req.body.season);
+    const season = Number.isInteger(asked) && asked >= 1 && asked <= 100 ? asked : await guessSeason(m, tvdbId);
     const owned = (await sonarrSeries(true)).some((x) => x.tvdbId === tvdbId);
-    if (owned) r = season ? await monitorSeason(tvdbId, season) : { title: cands.find((c) => c.tvdbId === tvdbId)?.title ?? title(m), alreadyInLibrary: true };
+    // Never remember "this show is that series, season unknown" for something already in Sonarr: it would hide the
+    // "get the new season" choice for good. Ask for the season instead.
+    if (owned && !season) throw fail("This series is already in Sonarr. Choose which season this is.", 422);
+    if (owned) r = await monitorSeason(tvdbId, season!);
     else r = await addSeries(tvdbId, season, { monitor: monitorChoice(req.body.monitor), search: typeof req.body.search === "boolean" ? req.body.search : undefined });
     await saveOverride(anilistId, tvdbId, season);
   } else {
@@ -554,7 +571,7 @@ app.post<{ Querystring: { apikey?: string } }>("/api/webhook/sonarr", { config: 
   const s = getSettings();
   if (safeEqual(req.query.apikey, s.apiKey)) {
     legacyWebhookAt = Date.now();
-    throw fail("The admin key isn't accepted in webhook addresses any more. Copy the new address from Tastearr's Settings → Alerts.", 401);
+    throw fail("Bad webhook key", 401); // the in-app banner explains the new address
   }
   if (!safeEqual(req.query.apikey, s.webhookKey)) throw fail("Bad webhook key", 401);
   legacyWebhookAt = Date.now();

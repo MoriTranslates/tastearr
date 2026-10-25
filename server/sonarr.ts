@@ -156,7 +156,9 @@ export async function lookupByTitle(titles: string[], year: number | null = null
       if (!x.tvdbId || seen.has(x.tvdbId)) continue;
       const y = (x.year as number | undefined) || null;
       const have = words(x.title);
-      const overlap = [...have].filter((w) => want.has(w)).length / Math.max(1, have.size);
+      // Shared words over the longer of the two titles, so "Dark Blue" doesn't look like a match for a long title.
+      const shared = [...have].filter((w) => want.has(w)).length;
+      const overlap = shared / Math.max(1, have.size, Math.min(want.size, 8));
       // Best guess first: title overlap, a little extra when it's a series already in Sonarr (a new season of something
       // owned) and still a close title, then a plausible year (a series can't start after the show we're matching).
       const rank = overlap * 2 + (owned.has(x.tvdbId) && overlap >= 0.5 ? 0.5 : 0) + (year && y ? (Math.abs(year - y) <= 1 ? 0.5 : y > year ? -1 : 0) : 0);
@@ -169,7 +171,7 @@ export async function lookupByTitle(titles: string[], year: number | null = null
         overview: ((x.overview as string | undefined) ?? "").slice(0, 200) || null,
         inLibrary: owned.has(x.tvdbId),
         // Half the words in common or more: worth offering as "Is this it?". Below that, just list them.
-        confident: overlap >= 0.5,
+        confident: overlap >= 0.5 && (shared >= 2 || have.size === 1),
         rank,
       });
     }

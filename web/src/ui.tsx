@@ -25,7 +25,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast${t.error ? " err" : ""}`}>
+          <div key={t.id} className={`toast${t.error ? " err" : ""}`} aria-hidden={t.error || undefined}>
             <span>{t.msg}</span>
             {t.action && (
               <button
@@ -61,6 +61,12 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close.current();
       if (e.key !== "Tab" || !ref.current) return;
+      // Focus fell out (the element holding it was removed): bring it back in.
+      if (!ref.current.contains(document.activeElement)) {
+        e.preventDefault();
+        ref.current.querySelector<HTMLElement>("button, select, input")?.focus();
+        return;
+      }
       // Keep Tab inside the dialog.
       const items = [...ref.current.querySelectorAll<HTMLElement>("button:not([disabled]), select, input:not([disabled]), a[href]")];
       if (!items.length) return;

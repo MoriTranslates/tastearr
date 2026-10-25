@@ -9,7 +9,7 @@ try {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.accessSync(CONFIG_DIR, fs.constants.W_OK);
   // Files left by an older version that ran as root.
-  for (const f of ["tastearr.db", "tastearr.db-wal", "anime-list-full.json"]) if (fs.existsSync(path.join(CONFIG_DIR, f))) fs.accessSync(path.join(CONFIG_DIR, f), fs.constants.W_OK);
+  for (const f of ["tastearr.db", "tastearr.db-wal", "tastearr.db-shm", "anime-list-full.json"]) if (fs.existsSync(path.join(CONFIG_DIR, f))) fs.accessSync(path.join(CONFIG_DIR, f), fs.constants.W_OK);
 } catch {
   // The usual first-run problem: Docker created the folder as root, and Tastearr runs as a normal user.
   const who = typeof process.getuid === "function" ? `${process.getuid()}:${process.getgid?.()}` : "the container user";

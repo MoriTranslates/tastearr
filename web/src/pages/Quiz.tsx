@@ -81,13 +81,18 @@ export function Quiz({ onDone }: { onDone: () => void }) {
     }
   }
 
+  const [searching, setSearching] = useState(false);
   async function search(e: React.FormEvent) {
     e.preventDefault();
-    if (q.trim().length < 2) return;
+    if (q.trim().length < 2 || searching) return;
+    setSearching(true);
     try {
-      setFound(await api<Found[]>(`/quiz/search?q=${encodeURIComponent(q.trim())}`));
+      // AniList requests queue behind any background refresh; don't leave the button hanging forever.
+      setFound(await api<Found[]>(`/quiz/search?q=${encodeURIComponent(q.trim())}`, { signal: AbortSignal.timeout(30_000) }));
     } catch (err) {
-      toast((err as Error).message, true);
+      toast((err as Error).name === "TimeoutError" ? "AniList is busy right now. Try again in a minute." : (err as Error).message, true);
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -155,7 +160,9 @@ export function Quiz({ onDone }: { onDone: () => void }) {
           <p className="muted">Skip anything you haven't watched. About 10 answers is plenty to start. ({answered} so far)</p>
           <form className="row" onSubmit={search} role="search">
             <input type="search" placeholder="Add a show you've seen, e.g. Frieren" aria-label="Find a show you've seen" value={q} onChange={(e) => setQ(e.target.value)} />
-            <button className="ghost">Find</button>
+            <button className="ghost" disabled={searching}>
+              {searching ? "Searching…" : "Find"}
+            </button>
           </form>
           {found && (
             <div className="cand-list">

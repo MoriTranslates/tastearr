@@ -109,6 +109,7 @@ export function Picks({ status }: { status: Status }) {
       if (!alive) return;
       if (st && !st.building) {
         cache.clear();
+        heroes.clear();
         setRebuilding(false);
         setReload((x) => x + 1);
       } else setTimeout(poll, 3000);
@@ -135,7 +136,7 @@ export function Picks({ status }: { status: Status }) {
       (p) =>
         (showFiltered || !p.excluded) &&
         (showLibrary || !p.inLibrary) &&
-        (!services.length || p.streaming.some((x) => services.includes(x.site)) || (!p.streaming.length && p.status === "NOT_YET_RELEASED")) &&
+        (!services.length || p.streaming.some((x) => services.includes(x.site)) || (!p.streaming.length && (p.status === "NOT_YET_RELEASED" || p.format === "MOVIE"))) &&
         (day === null || (p.nextAiring && weekday(p.nextAiring.at) === day)),
     );
     return list.sort(SORTS[sort].fn);
@@ -149,7 +150,10 @@ export function Picks({ status }: { status: Status }) {
       (!services.length || p.streaming.some((x) => services.includes(x.site)));
     const kept = picks?.find((p) => p.id === heroes.get(key));
     if (kept && ok(kept)) return kept;
-    const best = (picks ?? []).filter((p) => ok(p) && !p.verdict).sort((a, b) => b.match - a.match)[0] ?? null;
+    // Rather than no top pick at all: a strong sequel to something not seen yet, labelled "start with season 1".
+    const unseenSequel = (p: Pick) => ok({ ...p, continues: null }) && p.match >= 75 && !!p.continues && !p.continues.kept;
+    const pool = (picks ?? []).filter((p) => !p.verdict);
+    const best = pool.filter(ok).sort((a, b) => b.match - a.match)[0] ?? pool.filter(unseenSequel).sort((a, b) => b.match - a.match)[0] ?? null;
     if (best) heroes.set(key, best.id);
     return best;
   }, [picks, services, key]);
@@ -269,9 +273,14 @@ export function Picks({ status }: { status: Status }) {
 
       {rebuilding && <p className="banner">Updating your picks with your new answers…</p>}
 
+      {picks && view === "grid" && !top && day === null && picks.length > 0 && (
+        <p className="muted small">Nothing new this season is a strong match for you yet. Sequels and shows you follow are below.</p>
+      )}
       {picks && view === "grid" && top && day === null && (
         <div className="hero">
-          <h2 className="small muted">Top new pick for you · {top.match}% match</h2>
+          <h2 className="small muted">
+            Top pick for you · {top.match}% match{top.continues && !top.continues.kept ? ` · start with ${top.continues.title} first` : ""}
+          </h2>
           <PickCard p={top} patch={patch} toast={toast} status={status} onAdd={(p, mode = "add") => setAdding({ p, mode })} />
         </div>
       )}
@@ -283,8 +292,10 @@ export function Picks({ status }: { status: Status }) {
           const open = !collapsed.includes(sec.id);
           // Low matches (mostly kids minis and promos in Shorts) wait behind "show more" unless sorted otherwise.
           const cut = sec.id === "shorts" ? 20 : 15;
-          const low = sort === "match" && !lowOpen.includes(sec.id) ? all.filter((p) => p.match < cut && !p.inLibrary && !p.myStatus && !p.following) : [];
+          const early = (p: Pick) => p.lowConfidence && p.status === "NOT_YET_RELEASED";
+          const low = sort === "match" && !lowOpen.includes(sec.id) ? all.filter((p) => p.match < cut && !early(p) && !p.inLibrary && !p.myStatus && !p.following) : [];
           const items = all.filter((p) => !low.includes(p));
+          if (sec.id === "continuing" && sort === "match") items.sort((a, b) => Number(!!b.continues?.kept || !!b.myStatus || b.inLibrary) - Number(!!a.continues?.kept || !!a.myStatus || a.inLibrary));
           return (
             <div key={sec.id} className="section">
               <h2 className="section-head">
@@ -420,14 +431,15 @@ const STATUS_BADGE: Record<string, string> = { watching: "You're watching", seen
 function matchText(p: Pick) {
   // Before airing, a low score on a show with almost no data means "unknown", not "you'd dislike it".
   if (p.lowConfidence && p.status === "NOT_YET_RELEASED" && p.match < 35) return "Too early to tell";
-  if (p.match < 15) return "Not for you";
+  if (p.match < 15) return p.section === "shorts" ? "Mini short" : "Not for you";
   return p.lowConfidence ? `~${p.match}% match` : `${p.match}% match`;
 }
 
 function storyLine(p: Pick) {
   if (p.continues) {
     if (p.continues.behind > 0) return `Sequel to ${p.continues.title}. You're ${p.continues.behind} season${p.continues.behind > 1 ? "s" : ""} behind.`;
-    return p.continues.kept ? `Continues ${p.continues.title}` : `Sequel to ${p.continues.title} (start there if you haven't seen it)`;
+    if (p.continues.kept) return `Continues ${p.continues.title}`;
+    return p.match >= 50 ? `Sequel to ${p.continues.title}: watch the earlier seasons first` : `Sequel to ${p.continues.title}`;
   }
   if (p.compilationOf) return `Compilation of ${p.compilationOf.title}${p.compilationOf.seen ? " (you've seen it)" : ""}`;
   if (p.spinOffOf) return `Spin-off of ${p.spinOffOf}`;
@@ -447,7 +459,9 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
       patch(p.id, { following: on, verdict: on ? "added" : p.verdict });
       toast(
         on
-          ? status.alerts
+          ? p.format === "MOVIE"
+            ? `Following ${p.title}. It's in My Shows; where to stream it appears there once it's on a service.`
+            : status.alerts
             ? `Following ${p.title}. You'll get an alert when episodes come out.`
             : `Following ${p.title}. It's on your Schedule and in My Shows. Set up alerts in Settings to get a ping when episodes come out.`
           : `Stopped following ${p.title}`,
@@ -499,7 +513,7 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
   const story = storyLine(p);
 
   let primary: React.ReactNode;
-  if (p.inLibrary && p.matchGuessed && !p.tvdbSeason && p.status !== "FINISHED") {
+  if (p.inLibrary && p.matchGuessed && !p.tvdbSeason && p.status !== "FINISHED" && !p.seasonMonitored) {
     // A new season of a series in Sonarr whose TVDB season isn't known yet: let the user say which season it is.
     primary = (
       <button className="primary" disabled={busy} onClick={() => onAdd(p, "pick-season")}>
@@ -521,7 +535,7 @@ function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: 
         Add to {p.addVia === "radarr" ? "Radarr" : "Sonarr"}…
       </button>
     );
-  } else if (p.inLibrary === false) {
+  } else if (p.section !== "movies") {
     primary = (
       <button className={p.following ? "ghost" : "primary"} disabled={busy} onClick={() => follow(!p.following)}>
         {p.following ? "✓ Following" : "Follow"}
@@ -768,7 +782,7 @@ function AddDialog({ p, mode, onClose, patch, toast }: { p: Pick; mode: Mode; on
               <li>
                 <strong>{plan.title}</strong>
                 {plan.year ? ` (${plan.year})` : ""} {plan.alreadyInLibrary ? "is already in Sonarr" : "as an anime series"}
-                {match && (
+                {match && mode === "add" && (
                   <>
                     {" · "}
                     <button className="linklike small" onClick={() => pick(null)}>
@@ -798,7 +812,8 @@ function AddDialog({ p, mode, onClose, patch, toast }: { p: Pick; mode: Mode; on
                   void loadPlan(`?tvdbId=${match.tvdbId}${v ? `&season=${v}` : ""}`, true);
                 }}
               >
-                <option value="">Not sure (only new episodes)</option>
+                {mode !== "pick-season" && <option value="">Not sure (only new episodes)</option>}
+                {mode === "pick-season" && !season && <option value="">Choose a season…</option>}
                 {[...plan.seasons!, nextSeason].map((n) => (
                   <option key={n} value={n}>
                     Season {n}
@@ -835,7 +850,7 @@ function AddDialog({ p, mode, onClose, patch, toast }: { p: Pick; mode: Mode; on
             <button className="ghost" onClick={onClose}>
               Cancel
             </button>
-            <button className="primary" disabled={busy} onClick={go}>
+            <button className="primary" disabled={busy || (mode === "pick-season" && !season)} onClick={go}>
               {busy ? "Working…" : mode === "monitor" ? `Get season ${p.tvdbSeason}` : plan.alreadyInLibrary ? (season ? `Get season ${season}` : "Match it") : "Add"}
             </button>
           </div>

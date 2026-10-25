@@ -1,7 +1,7 @@
 import { db, droppedSet, setJob } from "./db.js";
 import { cachedMedia, getMediaByIds, getSeason, seasonOf, shiftSeason, SEASONS, type Media, type Season } from "./anilist.js";
 import { listEntries, refreshLists } from "./lists.js";
-import { clearInferred, mappingTables, setInferred, type Mapping } from "./mapping.js";
+import { dropInferred, mappingTables, setInferred, type Mapping } from "./mapping.js";
 import { watchStates, type WatchState } from "./mediaserver.js";
 import { radarrConfigured, radarrMovies, type RadarrMovie } from "./radarr.js";
 import { getSettings } from "./settings.js";
@@ -704,6 +704,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
 
     const isMovie = m.format === "MOVIE";
     const map = ctx.byAnilist.get(m.id) ?? (isMovie || opts.blind ? undefined : inferMapping(m, immediate, ctx));
+    if (!map && !opts.blind) dropInferred(m.id);
     const tmdbId = isMovie ? (ctx.movieByAnilist.get(m.id) ?? null) : null;
     const imdbId = isMovie ? (ctx.imdbByAnilist.get(m.id) ?? null) : null;
     const inLib = !isMovie && map ? ctx.lib.get(map.tvdbId) : undefined;
@@ -727,7 +728,9 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     const listed = opts.blind ? undefined : ctx.lists.get(m.id);
     if (myStatus === "watching") match = Math.max(match, (listed?.progress ?? 3) >= 3 ? 90 : 75);
     // Compilation / recap films retell a series: label them as such rather than as a spin-off.
-    const compilation = isMovie && !!parent && ((m.relations?.edges ?? []).some((e) => e.relationType === "SUMMARY") || /\b(compilation|recap|recompil|re-?edit|summary)/i.test(m.description ?? ""));
+    // AniList puts the SUMMARY edge on the original, pointing at its recap; the recap points back as PARENT.
+    const compilation =
+      isMovie && !!parent && ((parent.relations?.edges ?? []).some((e) => e.relationType === "SUMMARY" && e.node.id === m.id) || /\b(compilation|recap|recompil|re-?edit)\b/i.test(m.description ?? ""));
     // A retelling of something already seen is an optional rewatch: one consistent, modest score.
     if (compilation && parentLabel?.known && parentLabel.p >= 1) match = 50;
 
@@ -801,7 +804,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     return {
       id: m.id,
       title: immediate && title(immediate) === title(m) && m.title.romaji ? m.title.romaji : title(m),
-      altTitle: (m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null,
+      altTitle: ((m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null) === title(m) ? null : ((m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null),
       section,
       carryOver,
       format: m.format,
@@ -838,7 +841,12 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       tvdbSeason: map?.season ?? null,
       tmdbId,
       inLibrary,
-      seasonMonitored: inLib && map?.season ? (inLib.seasons.find((x) => x.seasonNumber === map.season)?.monitored ?? false) : null,
+      // Season unknown (a guessed match): if the series and its latest season are monitored, new episodes arrive anyway.
+      seasonMonitored: inLib && map?.season
+        ? (inLib.seasons.find((x) => x.seasonNumber === map.season)?.monitored ?? false)
+        : inLib && matchGuessed
+          ? inLib.monitored && !!inLib.seasons.filter((x) => x.seasonNumber > 0).at(-1)?.monitored
+          : null,
       addVia,
       cantAdd,
       needsMatch,
@@ -850,7 +858,6 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
 
 export async function recommend(season: Season, year: number, refresh = false): Promise<{ picks: Pick[]; profileBuiltAt: number }> {
   const s = getSettings();
-  clearInferred();
   const [list, profile, ctx] = await Promise.all([getSeason(season, year, refresh), getProfile(), context(refresh)]);
   const countries = new Set(s.training.countries);
   const ok = (m: Media) => !m.isAdult && !!m.format && CANDIDATE_FORMATS.has(m.format) && (!m.countryOfOrigin || countries.has(m.countryOfOrigin));

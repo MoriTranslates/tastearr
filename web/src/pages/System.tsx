@@ -40,8 +40,10 @@ export function System() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `tastearr-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      document.body.append(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setPw("");
     } catch (err) {
       toast((err as Error).message, true);

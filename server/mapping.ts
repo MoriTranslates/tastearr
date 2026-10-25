@@ -97,9 +97,9 @@ const inferred = new Map<number, Mapping>();
 export function setInferred(anilistId: number, m: Mapping) {
   inferred.set(anilistId, m);
 }
-/** Called at the start of every picks load, so a guess that no longer holds (library changed) doesn't linger. */
-export function clearInferred() {
-  inferred.clear();
+/** A show whose guess no longer holds (library changed) loses it; other seasons' guesses stay valid. */
+export function dropInferred(anilistId: number) {
+  inferred.delete(anilistId);
 }
 
 /** When the community list was last downloaded (System -> Health). */
