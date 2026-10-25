@@ -20,12 +20,35 @@ export function System() {
     };
   }, [toast]);
 
-  const [health, setHealth] = useState<{ checks: { name: string; ok: boolean; detail: string }[]; webhooks: Record<string, number> } | null>(null);
+  const [health, setHealth] = useState<{ checks: { name: string; ok: boolean; detail: string }[] } | null>(null);
   const checkHealth = () => {
     setHealth(null);
     api<NonNullable<typeof health>>("/system/health").then(setHealth).catch((e) => toast(e.message, true));
   };
   useEffect(checkHealth, [toast]);
+
+  // The backup holds every key, so it asks for the password again (and needs a password login, not the home-network shortcut).
+  const [pw, setPw] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function backup(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await fetch("/api/system/backup", { method: "POST", headers: { "X-Tastearr": "1", "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.statusText);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `tastearr-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setPw("");
+    } catch (err) {
+      toast((err as Error).message, true);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (!info) return <p className="muted">Loading…</p>;
   return (
@@ -56,13 +79,6 @@ export function System() {
                 </span>
               </li>
             ))}
-            {Object.entries(health.webhooks).map(([k, at]) => (
-              <li key={k}>
-                <span aria-hidden="true">✓</span>
-                <strong>{k === "sonarr" ? "Sonarr" : "Radarr"} webhook</strong>
-                <span className="muted small">last heard from {relTime(at)}</span>
-              </li>
-            ))}
             {!health.checks.length && <li className="muted small">Nothing connected yet.</li>}
           </ul>
         )}
@@ -73,9 +89,12 @@ export function System() {
           Downloads Tastearr's database: settings, keys, your ratings and taste data. Keep it private; it holds your API keys. To restore, stop the container and put the file in your
           config folder as <code>tastearr.db</code>.
         </p>
-        <a className="button ghost" href="/api/system/backup" download>
-          Download backup
-        </a>
+        <form className="row" onSubmit={backup}>
+          <input type="password" aria-label="Your password" placeholder="Your password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <button className="ghost" disabled={!pw || saving}>
+            {saving ? "Preparing…" : "Download backup"}
+          </button>
+        </form>
       </div>
       <div className="card pad">
         <h2>Tasks</h2>

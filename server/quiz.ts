@@ -10,15 +10,15 @@ import { title } from "./taste.js";
  */
 const ARCHETYPES: { key: string; label: string; filter: PopularFilter }[] = [
   { key: "isekai", label: "Transported to another world", filter: { tag_in: ["Isekai"], source: "LIGHT_NOVEL" } },
-  { key: "game", label: "Video-game worlds", filter: { tag_in: ["Video Games"] } },
+  { key: "game", label: "Video-game worlds", filter: { tag_in: ["Video Games"], minRank: 80 } },
   { key: "adventure", label: "Fantasy adventure", filter: { genre_in: ["Adventure"], tag_in: ["Travel"] } },
   { key: "ecchi", label: "Fan service & harem", filter: { genre_in: ["Ecchi"], tag_in: ["Female Harem"] } },
   { key: "battle", label: "Big battles (shounen)", filter: { tag_in: ["Shounen"], genre_in: ["Action"] } },
   { key: "dark", label: "Dark & psychological", filter: { genre_in: ["Psychological"] } },
   { key: "romcom", label: "Romantic comedy", filter: { tag_in: ["Male Protagonist"], genre_in: ["Romance"] } },
-  { key: "shoujo", label: "Romance (shoujo/josei)", filter: { tag_in: ["Female Protagonist"], genre_in: ["Romance", "Drama"] } },
+  { key: "shoujo", label: "Romance (shoujo/josei)", filter: { tag_in: ["Shoujo"], genre_in: ["Romance"] } },
   { key: "cozy", label: "Cute & cozy", filter: { tag_in: ["Cute Girls Doing Cute Things", "Iyashikei"] } },
-  { key: "food", label: "Food & cooking", filter: { tag_in: ["Food"] } },
+  { key: "food", label: "Food & cooking", filter: { tag_in: ["Food"], minRank: 80 } },
   { key: "sports", label: "Sports", filter: { genre_in: ["Sports"] } },
   { key: "mecha", label: "Robots & sci-fi", filter: { genre_in: ["Mecha"] } },
   { key: "horror", label: "Horror", filter: { genre_in: ["Horror"] } },
@@ -42,7 +42,7 @@ export const THEMES = [
 ];
 const PER_ARCHETYPE = 2;
 const OLD_BEFORE = 2010;
-const POOL_KEY = "quizPool";
+const POOL_KEY = "quizPool2"; // bump when ARCHETYPES change so saved pools are rebuilt
 
 let pool: { at: number; shows: { m: Media; archetype: string }[] } | null = null;
 let building: Promise<void> | null = null;

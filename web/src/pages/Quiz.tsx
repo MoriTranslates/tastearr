@@ -101,7 +101,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
     setSaving(true);
     try {
       await api("/profile/rebuild", { body: {} });
-      onDone();
+      await onDone();
       toast("Getting your picks ready…");
       navigate("/");
     } catch (e) {

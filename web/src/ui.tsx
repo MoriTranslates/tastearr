@@ -19,7 +19,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      {/* Permanent live region: screen readers ignore regions created on the fly. */}
+      {/* Permanent live regions (screen readers ignore regions created on the fly): errors assertive, the rest polite. */}
+      <div className="sr-only" role="alert">
+        {toasts.filter((t) => t.error).map((t) => t.msg).join(". ")}
+      </div>
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast${t.error ? " err" : ""}`}>

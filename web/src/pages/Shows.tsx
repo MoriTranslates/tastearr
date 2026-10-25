@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "../App";
+import { clearPicksCache } from "./Picks";
 import { api, type Followed, type Show, type Status } from "../api";
 import { airLabel, ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
 
@@ -36,6 +37,7 @@ export function Shows({ status }: { status: Status }) {
     try {
       await api(`/picks/${f.id}/unfollow`, { body: {} });
       setData((d) => d && { ...d, following: d.following.filter((x) => x.id !== f.id) });
+      clearPicksCache();
       toast(`Stopped following ${f.title}`, false, {
         label: "Undo",
         run: () =>

@@ -22,5 +22,5 @@ RUN mkdir -p /config && chown node:node /config
 USER node
 VOLUME /config
 EXPOSE 8383
-HEALTHCHECK --interval=60s --timeout=5s CMD wget -qO- http://127.0.0.1:8383/ping >/dev/null || exit 1
+HEALTHCHECK --interval=60s --timeout=5s CMD wget -qO- "http://127.0.0.1:${PORT:-8383}/ping" >/dev/null || exit 1
 CMD ["node", "--no-warnings=ExperimentalWarning", "dist/server/index.js"]

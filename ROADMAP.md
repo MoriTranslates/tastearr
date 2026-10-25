@@ -31,6 +31,10 @@ Each of these came up in reviews or user tests. They're reasonable but not essen
 | Dual-audio / language preference for adds | Belongs in Sonarr's custom formats, which Tastearr already uses via your profile |
 | Separate webhook keys for Sonarr and Radarr | One scoped key (not the admin key) is enough for a home setup |
 | Several Radarr instances | Anime movies are few; one Radarr covers almost everyone |
+| Staff, studio and PV embeds on cards; airing countdowns | AniChart-style extras; AniList's own page is one tap away |
+| "New strong match" alerts as pre-air shows gain tags | Needs per-show alert history; the season alert covers the main moment |
+| A separate read-only key for import lists | The webhook key already can't read or change anything else |
+| Soft "never" (a penalty instead of hiding) | Testers expected "never" to mean never; hidden shows stay reachable under "Show hidden ones" |
 
 ## Decisions
 
@@ -39,7 +43,9 @@ Each of these came up in reviews or user tests. They're reasonable but not essen
 - Extra Sonarr instances count for "You have this" and can be monitored; new shows go to the main one.
 - Popularity before a show airs gets a floor, because AniList numbers are tiny until it starts. Training weighs recent seasons more (0.9 per season back).
 - Match % for a show you're watching never reads below 75–90%: the badge and the number shouldn't disagree.
-- A "never" genre doesn't remove a show that's a strong match on everything else (an isekai that's also tagged Slice of Life).
+- "Never" means never: a genre or tag marked never always hides the show (it stays visible under "Show hidden ones", with the reason).
+- Import lists contain only 👍 from the Picks page in the last four months, never quiz answers, so enabling a list can't pull in a back catalogue.
+- Shows with almost no tags before airing borrow tags from their source manga or novel; a low score on such a show reads "Too early to tell".
 - Login is always required once an account exists. "Not when I'm on my home network" matches Sonarr's "Disabled for local addresses" and never applies to proxied requests.
 - Adding a sequel you don't own only monitors that season. When the season is unknown, only new episodes are monitored. Nothing is ever deleted.
 - Match % is calibrated against your own history with `npm run eval`; 50% means you keep roughly 1 in 4 shows like it.

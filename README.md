@@ -15,7 +15,7 @@
   - A **two-minute quiz** for brand-new users.
 - **Works without the \*arrs.** No Sonarr? Press **Follow** and use Tastearr as a seasonal tracker that points you to legal streams.
 - **Add with a preview** to Sonarr (as an anime series; for a sequel you don't own it monitors only the new season) or to Radarr for anime movies. You see the profile, folder, tags and what will download before anything is written. New seasons the ID list hasn't matched yet are matched through the earlier season you own.
-- **Or let Sonarr/Radarr pull.** Prefer no write access? Point a Sonarr/Radarr **Custom List** at Tastearr's import list of your 👍 picks.
+- **Or let Sonarr/Radarr pull.** Prefer no write access? Point a Sonarr/Radarr **Custom List** at Tastearr's import list of the shows you gave 👍 on the Picks page.
 - **Several Sonarr instances** (a separate anime or 4K Sonarr) count toward "You have this".
 - **Phone alerts** through [ntfy](https://ntfy.sh), Gotify or Discord:
   - when Sonarr/Radarr finishes a download;
@@ -75,6 +75,8 @@ services:
 
 `GET /ping` answers `{"status":"OK"}` without a login, for Docker health checks and Uptime Kuma.
 
+**Upgrading from v0.3 or older with Docker Compose:** the image now runs as an unprivileged user. If `/config` was written by an older version running as root, run `sudo chown -R 1000:1000 ./tastearr` once (Unraid users are unaffected: the template runs as 99:100). Tastearr prints this hint if it can't write its folder.
+
 ## Setup
 
 The first visit asks you to create an account. A setup guide then walks you through Sonarr/Radarr, watch history, and your AniList/MAL list or the quiz. Each step explains what it's for and can be skipped.
@@ -84,9 +86,9 @@ For **phone alerts**:
 2. Paste the topic's address under Settings → Alerts.
 3. In Sonarr/Radarr, add a Webhook connection with **On Import** ticked, using the address shown in Settings.
 
-**Import lists (optional):** Settings → Security → Keys shows two addresses. In Sonarr, add an Import List of type **Custom List** with the first; in Radarr, a **Custom List** with the second. They list the shows and movies you gave 👍 or ♥.
+**Import lists (optional):** Settings → Security → Keys shows two addresses. In Sonarr, add an Import List of type **Custom List** with the first; in Radarr, a **Custom List** with the second. They list what you gave 👍 on the Picks page in the last four months (quiz answers are never included). Recommended Sonarr list settings: Series Type *Anime*, Monitor *Last Season*, Search on add off, a `tastearr` tag, and "Clean Library Level" left disabled.
 
-**System → Health** checks every connection like Sonarr's health page. **System → Backup** downloads the database (it contains your keys; keep it private). To restore, stop the container and put the file in `/config` as `tastearr.db`.
+**System → Health** checks every connection like Sonarr's health page. **System → Backup** downloads the database after asking for your password again (it contains your keys; keep it private). To restore, stop the container and put the file in `/config` as `tastearr.db`.
 
 ## Security
 

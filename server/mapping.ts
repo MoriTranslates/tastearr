@@ -97,6 +97,10 @@ const inferred = new Map<number, Mapping>();
 export function setInferred(anilistId: number, m: Mapping) {
   inferred.set(anilistId, m);
 }
+/** Called at the start of every picks load, so a guess that no longer holds (library changed) doesn't linger. */
+export function clearInferred() {
+  inferred.clear();
+}
 
 /** When the community list was last downloaded (System -> Health). */
 export function mappingFileAge() {

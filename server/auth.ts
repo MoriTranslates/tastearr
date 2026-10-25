@@ -55,7 +55,7 @@ export function verifyAction(action: string, id: number, exp: number, sig: strin
   return exp > Date.now() && safeEqual(sig, hmac(`action:${action}:${id}:${exp}`));
 }
 
-function isPrivateIp(ip: string) {
+export function isPrivateIp(ip: string) {
   const v4 = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
   if (net.isIPv4(v4)) {
     const [a, b] = v4.split(".").map(Number);

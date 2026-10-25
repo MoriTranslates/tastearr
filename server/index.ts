@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
-import { getMediaByIds, searchTitle, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
-import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, loginAllowed, loginSucceeded, makeSession, PROXY_TRUSTED, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
+import { cachedMedia, getMediaByIds, searchTitle, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
+import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, isPrivateIp, loginAllowed, loginSucceeded, makeSession, PROXY_TRUSTED, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
 import { CONFIG_DIR, db, listJobs, setJob } from "./db.js";
 import { discover, useDiscovered } from "./discover.js";
 import { announceAired, follow, followedIds, followedShows, unfollow } from "./following.js";
@@ -17,7 +17,7 @@ import { getQuiz, prewarmQuiz } from "./quiz.js";
 import { addMovie, radarrOptions, testRadarr } from "./radarr.js";
 import { checkPassword, getSettings, isMasked, patchSettings, publicSettings, regenerateKey, safeEqual, setAccount, setBypassLocal, setGenrePrefs, updateSettings, type Settings } from "./settings.js";
 import { dropShow, handleRadarrWebhook, handleSonarrWebhook, myShows, undropShow } from "./shows.js";
-import { addSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrOptions, sonarrSeries, testSonarr } from "./sonarr.js";
+import { addSeries, forgetSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrOptions, sonarrSeries, testSonarr } from "./sonarr.js";
 import { getProfile, invalidateContext, isBuilding, rebuildProfile, recommend, setFeedback, storedProfile, title } from "./taste.js";
 
 function findPackageJson() {
@@ -64,12 +64,16 @@ const id = (v: string) => {
 
 const monitorChoice = (v: unknown) => (["season", "all", "future", "none"] as const).find((x) => x === v);
 
-/** The TVDB season for a show matched by hand: one past its earlier season's, when that earlier season maps to the same series. */
-async function guessSeason(m: { relations?: { edges: { relationType: string; node: { id: number } }[] } | null }, tvdbId: number) {
+/**
+ * The TVDB season for a show matched by hand: one past its earlier season's when that maps to the same series. A split
+ * cour ("Part 2", "2nd cour") is filed by TVDB under the same season as its first half.
+ */
+async function guessSeason(m: { title: { english: string | null; romaji: string | null }; relations?: { edges: { relationType: string; node: { id: number } }[] } | null }, tvdbId: number) {
+  const splitCour = /part\s*(2|ii)|2nd cour|cour 2/i.test(`${m.title.english} ${m.title.romaji}`);
   for (const e of m.relations?.edges ?? []) {
     if (e.relationType !== "PREQUEL") continue;
     const pm = await mapAnilist(e.node.id);
-    if (pm?.tvdbId === tvdbId && pm.season) return pm.season + 1;
+    if (pm?.tvdbId === tvdbId && pm.season) return splitCour ? pm.season : pm.season + 1;
   }
   return null;
 }
@@ -78,7 +82,11 @@ async function guessSeason(m: { relations?: { edges: { relationType: string; nod
 async function firstOfMany(map: { tvdbId: number; season: number | null }) {
   if (map.season !== 1) return false;
   const t = await mappingTables();
-  return (t.byTvdb.get(map.tvdbId) ?? []).filter((x) => t.byAnilist.get(x)?.season === 1).length > 1;
+  const ids = (t.byTvdb.get(map.tvdbId) ?? []).filter((x) => t.byAnilist.get(x)?.season === 1);
+  if (ids.length < 2) return false;
+  const media = await getMediaByIds(ids);
+  const years = media.map((x) => x.seasonYear ?? x.startDate?.year ?? 0).filter(Boolean);
+  return media.some((x) => (x.episodes ?? 0) > 50) || (years.length > 1 && Math.max(...years) - Math.min(...years) >= 3);
 }
 
 /** A stored secret is only re-used for the URL it was saved with, so it can't be sent somewhere new. */
@@ -142,7 +150,7 @@ const webhookSeen: Record<string, number> = {};
 function warnings() {
   const out: string[] = [];
   if (legacyWebhookAt) out.push("Sonarr is still using the old webhook address, which has a key in the URL. Copy the new one from Settings → Alerts into Sonarr's Connect → Webhook.");
-  if (proxySeen) out.push("Logins are coming through a reverse proxy. Set the TRUST_PROXY variable to your proxy's address so login protection sees real client addresses.");
+  if (proxySeen) out.push("If you use a reverse proxy, set the TRUST_PROXY variable to your proxy's IP address (not a hop count) so login protection sees real client addresses.");
   return out;
 }
 
@@ -169,7 +177,8 @@ app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; 
 
 app.post<{ Body: { username?: string; password?: string } }>("/api/auth/login", { config: { setup: true } }, async (req, reply) => {
   if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
-  if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"])) proxySeen = true;
+  // Only a real proxy (a LAN peer adding the header) counts; a forged header from outside can't raise the banner.
+  if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) && isPrivateIp(req.socket.remoteAddress ?? "")) proxySeen = true;
   if (!loginAllowed(req.ip, String(req.body?.username ?? ""))) throw fail("Too many attempts, wait a few seconds and try again", 429);
   const a = getSettings().auth;
   const okUser = safeEqual(String(req.body?.username ?? ""), a.username);
@@ -235,12 +244,14 @@ app.post<{ Body: { name?: string; url?: string; apiKey?: string } }>("/api/sonar
   const v = await testSonarr({ url, apiKey });
   const name = String(req.body?.name ?? "").trim().slice(0, 40) || new URL(url).host;
   patchSettings((x) => ({ ...x, sonarrExtra: [...x.sonarrExtra, { name, url, apiKey }] }));
+  forgetSeries();
   invalidateContext();
   return { ok: true, version: v.version };
 });
 app.delete<{ Params: { i: string } }>("/api/sonarr/extra/:i", async (req) => {
   const i = Number(req.params.i);
   patchSettings((x) => ({ ...x, sonarrExtra: x.sonarrExtra.filter((_, k) => k !== i) }));
+  forgetSeries();
   invalidateContext();
   return { ok: true };
 });
@@ -366,22 +377,35 @@ app.get("/api/system/health", async () => {
   });
   for (const j of listJobs()) if (j.state === "error") checks.push({ name: `Background job: ${j.name}`, ok: false, detail: String(j.detail ?? "") });
   for (const w of warnings()) checks.push({ name: "Setup", ok: false, detail: w });
-  return { checks, webhooks: webhookSeen };
+  for (const app of ["sonarr", "radarr"] as const) {
+    if (!(s[app].url && s[app].apiKey)) continue;
+    const at = webhookSeen[app];
+    const name = `${app === "sonarr" ? "Sonarr" : "Radarr"} webhook`;
+    if (!at) checks.push({ name, ok: true, detail: "Not heard from since Tastearr started. That's normal until something downloads; if alerts never arrive, add the webhook from Settings → Alerts." });
+    else checks.push({ name, ok: true, detail: `Last heard from ${Math.round((Date.now() - at) / 3_600_000)} hours ago` });
+  }
+  return { checks };
 });
 
-/** A copy of the database (settings, keys, taste data). Needs a password session: it contains every secret. */
-app.get("/api/system/backup", async (req, reply) => {
+/** A copy of the database (settings, keys, taste data). It contains every secret, so it asks for the password again. */
+app.post<{ Body: { password?: string } }>("/api/system/backup", async (req, reply) => {
   if (authState(req).via !== "session") throw fail("Log in with your password to download a backup", 403);
+  if (!(await checkPassword(String(req.body?.password ?? ""), getSettings().auth.passwordHash))) throw fail("Wrong password", 403);
   const tmp = path.join(CONFIG_DIR, `backup-${Date.now()}.db`);
-  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
-  const data = fs.readFileSync(tmp);
-  fs.rmSync(tmp, { force: true });
+  let data: Buffer;
+  try {
+    db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+    data = fs.readFileSync(tmp);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
   const stamp = new Date().toISOString().slice(0, 10);
   return reply.header("Content-Type", "application/octet-stream").header("Content-Disposition", `attachment; filename="tastearr-backup-${stamp}.db"`).send(data);
 });
 
 /** Forgets matches picked by hand; the community list applies again. */
-app.post("/api/mapping/reset", async () => {
+app.post("/api/mapping/reset", async (req) => {
+  if (authState(req).via !== "session") throw fail("Log in with your password to reset matches", 403);
   const n = clearOverrides();
   invalidateContext();
   return { cleared: n };
@@ -440,11 +464,12 @@ app.post<{ Params: { id: string }; Body: { monitor?: string; search?: boolean; t
     // A match picked from Sonarr's title search. Only results of that search are accepted, and the match is
     // remembered only once Sonarr took it, so a failed add can't leave a wrong match behind.
     const tvdbId = id(String(req.body.tvdbId));
-    const cands = await lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
-    if (!cands.some((c) => c.tvdbId === tvdbId)) throw fail("That isn't one of Sonarr's matches for this show", 422);
+    const current = await mapAnilist(anilistId);
+    const cands = current?.tvdbId === tvdbId ? [] : await lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
+    if (current?.tvdbId !== tvdbId && !cands.some((c) => c.tvdbId === tvdbId)) throw fail("That isn't one of Sonarr's matches for this show", 422);
     const season = req.body.season ? Number(req.body.season) || null : await guessSeason(m, tvdbId);
     const owned = (await sonarrSeries(true)).some((x) => x.tvdbId === tvdbId);
-    if (owned) r = season ? await monitorSeason(tvdbId, season) : { title: cands.find((c) => c.tvdbId === tvdbId)!.title, alreadyInLibrary: true };
+    if (owned) r = season ? await monitorSeason(tvdbId, season) : { title: cands.find((c) => c.tvdbId === tvdbId)?.title ?? title(m), alreadyInLibrary: true };
     else r = await addSeries(tvdbId, season, { monitor: monitorChoice(req.body.monitor), search: typeof req.body.search === "boolean" ? req.body.search : undefined });
     await saveOverride(anilistId, tvdbId, season);
   } else {
@@ -523,11 +548,15 @@ app.post<{ Params: { tvdbId: string } }>("/api/shows/:tvdbId/undrop", async (req
 
 // ---------------------------------------------------------------- incoming (own credentials)
 
-// v0.1 webhook address (?apikey=<key>). Still works so upgrades don't silently lose alerts, but it leaves a key in
-// Sonarr's logs, so the app shows a warning until Sonarr is pointed at the new address.
+// v0.1 webhook address (?apikey=<key>). Still works with the webhook key so upgrades don't silently lose alerts (with a
+// warning until Sonarr is pointed at the new address); the admin key is no longer accepted in a URL.
 app.post<{ Querystring: { apikey?: string } }>("/api/webhook/sonarr", { config: { public: true } }, async (req) => {
   const s = getSettings();
-  if (!safeEqual(req.query.apikey, s.apiKey) && !safeEqual(req.query.apikey, s.webhookKey)) throw fail("Bad webhook key", 401);
+  if (safeEqual(req.query.apikey, s.apiKey)) {
+    legacyWebhookAt = Date.now();
+    throw fail("The admin key isn't accepted in webhook addresses any more. Copy the new address from Tastearr's Settings → Alerts.", 401);
+  }
+  if (!safeEqual(req.query.apikey, s.webhookKey)) throw fail("Bad webhook key", 401);
   legacyWebhookAt = Date.now();
   app.log.warn("Sonarr is using the old v0.1 webhook address. Update it to the one shown in Settings → Alerts.");
   return { sent: await handleSonarrWebhook(req.body as Parameters<typeof handleSonarrWebhook>[0]) };
@@ -548,16 +577,33 @@ app.post<{ Params: { key: string } }>("/api/webhook/radarr/:key", { config: { pu
  * Import lists, for people who'd rather Sonarr/Radarr pull picks than let Tastearr write to them. Sonarr's "Custom
  * List" reads [{ tvdbId }]; Radarr's "Custom List" reads [{ id }] (TMDB). Lists shows given 👍 or ♥ on the Picks page.
  */
-const wanted = () => (db.prepare("SELECT anilist_id FROM feedback WHERE verdict IN ('liked', 'loved')").all() as { anilist_id: number }[]).map((r) => r.anilist_id);
+const wanted = () =>
+  (db.prepare("SELECT anilist_id FROM feedback WHERE source = 'picks' AND verdict IN ('liked', 'loved') AND at > ?").all(Date.now() - 120 * 86_400_000) as { anilist_id: number }[]).map(
+    (r) => r.anilist_id,
+  );
+const listTitle = (id: number) => {
+  const m = cachedMedia(id);
+  return m ? title(m) : undefined;
+};
 app.get<{ Params: { key: string } }>("/api/importlist/sonarr/:key", { config: { public: true } }, async (req) => {
   if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad key", 401);
   const t = await mappingTables();
-  return [...new Set(wanted().map((a) => t.byAnilist.get(a)?.tvdbId).filter((x): x is number => !!x))].map((tvdbId) => ({ tvdbId }));
+  const out = new Map<number, string | undefined>();
+  for (const a of wanted()) {
+    const tvdbId = t.byAnilist.get(a)?.tvdbId;
+    if (tvdbId && !out.has(tvdbId)) out.set(tvdbId, listTitle(a));
+  }
+  return [...out].map(([tvdbId, title]) => ({ tvdbId, title }));
 });
 app.get<{ Params: { key: string } }>("/api/importlist/radarr/:key", { config: { public: true } }, async (req) => {
   if (!safeEqual(req.params.key, getSettings().webhookKey)) throw fail("Bad key", 401);
   const t = await mappingTables();
-  return [...new Set(wanted().map((a) => t.movieByAnilist.get(a)).filter((x): x is number => !!x))].map((id) => ({ id }));
+  const out = new Map<number, string | undefined>();
+  for (const a of wanted()) {
+    const tmdb = t.movieByAnilist.get(a);
+    if (tmdb && !out.has(tmdb)) out.set(tmdb, listTitle(a));
+  }
+  return [...out].map(([id, title]) => ({ id, title }));
 });
 app.post<{ Params: { tvdbId: string }; Querystring: { exp?: string; sig?: string } }>("/api/actions/drop/:tvdbId", { config: { public: true } }, async (req) => {
   const tvdbId = id(req.params.tvdbId);

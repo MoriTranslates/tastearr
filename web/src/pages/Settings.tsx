@@ -19,6 +19,8 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
   const [tab, setTabRaw] = useState<Tab>(() => store.get<Tab | null>("settingsTab", null) ?? (status.mode === "stream" ? "picks" : "connections"));
   const setTab = (t: Tab) => (setTabRaw(t), store.set("settingsTab", t));
 
+  // Decided once per visit, so saving Sonarr inside the folded section doesn't reshuffle the page.
+  const [streamLayout] = useState(status.mode === "stream" && !status.sonarr && !status.radarr && !status.media);
   const saveAndNotify = async (patch: Partial<S>) => {
     const r = await save(patch);
     onSaved();
@@ -45,7 +47,7 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
       </div>
 
       {tab === "connections" &&
-        (status.mode === "stream" && !status.sonarr && !status.radarr && !status.media ? (
+        (streamLayout ? (
           <>
             <ListsCard s={s} save={saveAndNotify} />
             <details className="card pad">
@@ -298,10 +300,23 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
           <summary>Import lists (let Sonarr/Radarr pull your 👍 picks instead)</summary>
           <p className="muted small">
             In Sonarr: Settings → Import Lists → + → Custom List, and paste the first address. In Radarr: Settings → Lists → + → Custom List, and paste the second. They list
-            shows you gave 👍 or ♥ on the Picks page.
+            shows you gave 👍 on the Picks page.
           </p>
-          <p className="mono">{`${s.externalUrl || location.origin}/api/importlist/sonarr/${keys?.webhookKey ?? s.webhookKey}`}</p>
-          <p className="mono">{`${s.externalUrl || location.origin}/api/importlist/radarr/${keys?.webhookKey ?? s.webhookKey}`}</p>
+          {(["sonarr", "radarr"] as const).map((app) => {
+            const url = `${s.externalUrl || location.origin}/api/importlist/${app}/${keys?.webhookKey ?? s.webhookKey}`;
+            return (
+              <p key={app} className="row">
+                <span className="mono">{url}</span>
+                <button className="ghost small" onClick={() => navigator.clipboard?.writeText(url).then(() => toast("Copied"))}>
+                  Copy
+                </button>
+              </p>
+            );
+          })}
+          <p className="muted small">
+            Recommended Sonarr list settings: Series Type <em>Anime</em>, Monitor <em>Last Season</em>, Search on add off, tag <em>tastearr</em>, and leave "Clean Library
+            Level" disabled. Only 👍 from the last 4 months are listed; quiz answers never are.
+          </p>
         </details>
         <div className="row end">
           <button className="ghost" onClick={resetMatches}>

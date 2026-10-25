@@ -110,6 +110,7 @@ export function ExtraSonarrCard({ s, onChange }: { s: Settings; onChange: () => 
     }
   }
   async function remove(i: number) {
+    if (!confirm(`Remove ${s.sonarrExtra[i]?.name}? Shows there will no longer count as "You have this".`)) return;
     await api(`/sonarr/extra/${i}`, { method: "DELETE" }).catch((e) => toast((e as Error).message, true));
     onChange();
   }
@@ -196,6 +197,8 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
     try {
       const next = await save({ [kind]: { ...draft, url, apiKey } } as Partial<Settings>);
       setApiKey(next[kind].apiKey);
+      setUrl(next[kind].url);
+      setDraft(next[kind]);
       toast(`${name} saved`);
       onSaved?.();
     } catch (e) {

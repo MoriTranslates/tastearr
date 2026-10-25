@@ -171,7 +171,7 @@ export async function searchTitle(q: string): Promise<Media[]> {
   return d.Page.media;
 }
 
-export type PopularFilter = { genre_in?: string[]; tag_in?: string[]; source?: string };
+export type PopularFilter = { genre_in?: string[]; tag_in?: string[]; source?: string; minRank?: number };
 
 /**
  * Several "popular shows matching X" lists in one request (aliased pages, light fields), for the quiz pool. Tags must
@@ -187,9 +187,10 @@ export async function popularIdsBatch(filters: PopularFilter[], perPage = 20) {
       vars[`g${k}`] = f.genre_in;
       vars[`t${k}`] = f.tag_in;
       vars[`s${k}`] = f.source;
-      decl.push(`$g${k}: [String], $t${k}: [String], $s${k}: MediaSource`);
+      vars[`r${k}`] = f.minRank ?? 60;
+      decl.push(`$g${k}: [String], $t${k}: [String], $s${k}: MediaSource, $r${k}: Int`);
       return `p${k}: Page(perPage: ${perPage}) { media(type: ANIME, format_in: [TV, ONA], isAdult: false, countryOfOrigin: "JP", genre_in: $g${k}, tag_in: $t${k},
-        source: $s${k}, minimumTagRank: 60, sort: POPULARITY_DESC) { id startDate { year } relations { edges { relationType node { type } } } } }`;
+        source: $s${k}, minimumTagRank: $r${k}, sort: POPULARITY_DESC) { id startDate { year } relations { edges { relationType node { type } } } } }`;
     });
     const d = await gql<Record<string, { media: { id: number; startDate: { year: number | null } | null; relations: { edges: { relationType: string; node: { type: string } }[] } | null }[] }>>(
       `query (${decl.join(", ")}) { ${body.join(" ")} }`,

@@ -7,7 +7,11 @@ const SOURCES: Record<string, string> = { LIGHT_NOVEL: "Based on a light novel",
 /** Same plain names the cards and quiz use. */
 const TAGS: Record<string, string> = { "Female Harem": "Harem", "Male Harem": "Reverse harem", "Cute Girls Doing Cute Things": "Cute & cozy", Iyashikei: "Relaxing", "Video Games": "Video-game world", "Urban Fantasy": "Modern-day fantasy", "Super Power": "Superpowers", Swordplay: "Sword fights" };
 /** Tags that carry signal but read badly as "you skip X". */
-const QUIET = new Set(["Disability", "LGBTQ+ Themes", "Mental Illness", "Suicide", "Bullying", "Slavery", "Assassins", "Curses", "Male Protagonist", "Female Protagonist", "Heterosexual", "Kuudere", "Tsundere"]);
+const QUIET = new Set([
+  "Disability", "LGBTQ+ Themes", "Mental Illness", "Suicide", "Bullying", "Slavery", "Assassins", "Curses", "Male Protagonist", "Female Protagonist", "Heterosexual",
+  "Kuudere", "Tsundere", "Shounen", "Seinen", "Shoujo", "Josei", "Episodic", "Ensemble Cast", "Primarily Adult Cast", "Primarily Teen Cast", "Primarily Male Cast",
+  "Primarily Female Cast", "Primarily Child Cast", "Primarily Animal Cast", "Full CGI", "Chibi", "Coming of Age", "Nudity", "Gore",
+]);
 const name = (f: string) => (f.startsWith("S:") ? (SOURCES[f.slice(2)] ?? null) : QUIET.has(f.slice(2)) ? null : (TAGS[f.slice(2)] ?? f.slice(2)));
 
 function Bars({ items, kind }: { items: [string, { lift: number; n: number }][]; kind: "good" | "bad" }) {

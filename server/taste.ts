@@ -1,7 +1,7 @@
 import { db, droppedSet, setJob } from "./db.js";
 import { cachedMedia, getMediaByIds, getSeason, seasonOf, shiftSeason, SEASONS, type Media, type Season } from "./anilist.js";
 import { listEntries, refreshLists } from "./lists.js";
-import { mappingTables, setInferred, type Mapping } from "./mapping.js";
+import { clearInferred, mappingTables, setInferred, type Mapping } from "./mapping.js";
 import { watchStates, type WatchState } from "./mediaserver.js";
 import { radarrConfigured, radarrMovies, type RadarrMovie } from "./radarr.js";
 import { getSettings } from "./settings.js";
@@ -527,6 +527,13 @@ export interface Pick {
 
 const isAnime = (e: { node: { type: string } }) => e.node.type === "ANIME";
 const prequelIds = (m: Media) => (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL" && isAnime(e)).map((e) => e.node.id);
+// The manga/novel a show is based on (AniList links it as ADAPTATION or SOURCE; a related manga as ALTERNATIVE, last).
+const SOURCE_REL = ["SOURCE", "ADAPTATION", "ALTERNATIVE"];
+const sourceIds = (m: Media) =>
+  (m.relations?.edges ?? [])
+    .filter((e) => SOURCE_REL.includes(e.relationType) && e.node.type === "MANGA")
+    .sort((a, b) => SOURCE_REL.indexOf(a.relationType) - SOURCE_REL.indexOf(b.relationType))
+    .map((e) => e.node.id);
 const parentIds = (m: Media) => (m.relations?.edges ?? []).filter((e) => e.relationType === "PARENT" && isAnime(e)).map((e) => e.node.id);
 
 function jaccard(a: Set<string>, b: string[]) {
@@ -575,8 +582,11 @@ function inferMapping(m: Media, immediate: Media | null, ctx: Ctx): Mapping | un
   // Already added to Sonarr under exactly this title (by hand, or by Sonarr's own search): that's the match.
   const norm = (t: string | null | undefined) => (t ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   const names = new Set([norm(m.title.english), norm(m.title.romaji)].filter(Boolean));
+  const year = m.startDate?.year ?? m.seasonYear ?? null;
   for (const series of ctx.lib.values()) {
-    if (!names.has(norm(series.title)) || ctx.byTvdb.has(series.tvdbId)) continue;
+    if (!names.has(norm(series.title)) || ctx.byTvdb.has(series.tvdbId) || series.seriesType !== "anime") continue;
+    const sy = (series.year as number | undefined) ?? null;
+    if (year && sy && Math.abs(year - sy) > 1) continue;
     const real = series.seasons.filter((x) => x.seasonNumber > 0).length;
     const out = { tvdbId: series.tvdbId, season: real === 1 ? 1 : null };
     setInferred(m.id, out);
@@ -677,8 +687,12 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
 
     // Features, borrowing the prequel's tags when this entry has too few (common before it airs).
     let feats = features(m, m.status === "NOT_YET_RELEASED" ? 40 : undefined);
-    const donor = immediate ?? parent;
-    if (feats.filter((f) => f.startsWith("T:")).length < 4 && donor) feats = [...new Set([...feats, ...features(donor).filter((f) => !f.startsWith("G:"))])];
+    // Too few tags (usual before airing): borrow from the earlier season, the parent, or else the source manga/novel,
+    // which AniList has tagged for years (eval with sparse pre-air tags: recovers about half the lost accuracy).
+    const tagged = (x: Media) => features(x).filter((f) => f.startsWith("T:")).length >= 3;
+    const donor = immediate ?? parent ?? sourceIds(m).map(cachedMedia).find((x): x is Media => !!x && tagged(x)) ?? null;
+    // Only tags travel: a manga's own source ("original") or genres say nothing about the anime.
+    if (feats.filter((f) => f.startsWith("T:")).length < 4 && donor) feats = [...new Set([...feats, ...features(donor).filter((f) => (donor === immediate || donor === parent ? !f.startsWith("G:") : f.startsWith("T:")))])];
     const g = feats.filter((f) => f.startsWith("G:") && profile.features[f]).map((f) => Math.log(profile.features[f].lift));
     const t = feats.filter((f) => !f.startsWith("G:") && profile.features[f]).map((f) => Math.log(profile.features[f].lift)).sort((a, b) => b - a);
     const taste = (TUNE.taste ?? 0.8) * (GENRE_WEIGHT * mean(g) + (t.length ? mean(t) * 3 + mean(t.slice(0, 4)) : 0)) * (t.length / (t.length + 4));
@@ -713,7 +727,9 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     const listed = opts.blind ? undefined : ctx.lists.get(m.id);
     if (myStatus === "watching") match = Math.max(match, (listed?.progress ?? 3) >= 3 ? 90 : 75);
     // Compilation / recap films retell a series: label them as such rather than as a spin-off.
-    const compilation = isMovie && !!parent && /\b(compilation|recap|recompil|re-?edit|summary)/i.test(m.description ?? "");
+    const compilation = isMovie && !!parent && ((m.relations?.edges ?? []).some((e) => e.relationType === "SUMMARY") || /\b(compilation|recap|recompil|re-?edit|summary)/i.test(m.description ?? ""));
+    // A retelling of something already seen is an optional rewatch: one consistent, modest score.
+    if (compilation && parentLabel?.known && parentLabel.p >= 1) match = 50;
 
     // Where a show came from ("light novel adaptation") ranks, but makes a confusing reason chip, so it isn't shown.
     const byLift = feats.filter((f) => profile.features[f] && !f.startsWith("S:") && !QUIET_TAGS.has(f.slice(2))).map((f) => ({ label: label(f), lift: Math.round(profile.features[f].lift * 10) / 10 }));
@@ -735,7 +751,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     }
 
     const badGenre = m.genres.find((x) => neverGenres.has(x));
-    const badTag = m.tags.find((x) => x.rank >= s.training.minTagRank && excludeTags.has(x.name));
+    const badTag = m.tags.find((x) => excludeTags.has(x.name) && x.rank >= (s.filters.noGore && GORE_TAGS.includes(x.name) ? 35 : s.training.minTagRank));
     const excluded =
       verdict === "disliked"
         ? "You marked this 👎"
@@ -747,7 +763,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
               ? "You stopped watching this"
               : continuing
                 ? null
-                : badGenre && taste < 1
+                : badGenre
                   ? `You said never ${badGenre}`
                   : badTag
                     ? badTag.name === "Kids"
@@ -784,7 +800,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
 
     return {
       id: m.id,
-      title: title(m),
+      title: immediate && title(immediate) === title(m) && m.title.romaji ? m.title.romaji : title(m),
       altTitle: (m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null,
       section,
       carryOver,
@@ -834,6 +850,7 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
 
 export async function recommend(season: Season, year: number, refresh = false): Promise<{ picks: Pick[]; profileBuiltAt: number }> {
   const s = getSettings();
+  clearInferred();
   const [list, profile, ctx] = await Promise.all([getSeason(season, year, refresh), getProfile(), context(refresh)]);
   const countries = new Set(s.training.countries);
   const ok = (m: Media) => !m.isAdult && !!m.format && CANDIDATE_FORMATS.has(m.format) && (!m.countryOfOrigin || countries.has(m.countryOfOrigin));
@@ -853,8 +870,10 @@ export async function recommend(season: Season, year: number, refresh = false): 
   // AniList pages can repeat a show when popularity shifts mid-pagination.
   const candidates = [...new Map([...list.filter(ok), ...carryCandidates].map((m) => [m.id, m])).values()];
 
-  // Prefetch the prequel chain and parents so sequels can inherit labels, titles and tags.
-  let frontier = [...new Set(candidates.flatMap((m) => [...prequelIds(m), ...parentIds(m)]))];
+  // Prefetch the prequel chain and parents so sequels can inherit labels, titles and tags, and the source manga of
+  // tag-sparse shows (one batched request).
+  const sparse = candidates.filter((m) => m.tags.filter((t) => t.rank >= s.training.minTagRank).length < 4);
+  let frontier = [...new Set([...candidates.flatMap((m) => [...prequelIds(m), ...parentIds(m)]), ...sparse.flatMap(sourceIds)])];
   for (let depth = 0; depth < 3 && frontier.length; depth++) {
     const got = await getMediaByIds(frontier).catch(() => [] as Media[]);
     frontier = [...new Set(got.flatMap(prequelIds))].filter((id) => !cachedMedia(id));

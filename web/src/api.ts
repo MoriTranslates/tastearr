@@ -176,7 +176,7 @@ export interface AddPlan {
   minimumAvailability?: string;
 }
 
-export interface Candidate { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean }
+export interface Candidate { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean; confident: boolean }
 
 export interface ArrOptions { profiles: { id: number; name: string }[]; roots: { id: number; path: string }[]; tags: { id: number; label: string }[] }
 

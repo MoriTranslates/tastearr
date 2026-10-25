@@ -2,7 +2,7 @@ import { db } from "./db.js";
 import { getSettings, type Settings } from "./settings.js";
 
 export interface SonarrSeason { seasonNumber: number; monitored: boolean; statistics?: { episodeFileCount: number; totalEpisodeCount: number; episodeCount: number } }
-export interface SonarrSeries { id: number; tvdbId: number; title: string; seriesType: string; status: string; monitored: boolean; seasons: SonarrSeason[]; instance?: number; [k: string]: unknown }
+export interface SonarrSeries { id: number; tvdbId: number; title: string; seriesType: string; status: string; monitored: boolean; seasons: SonarrSeason[]; instance?: string; [k: string]: unknown }
 
 type Conn = Pick<Settings["sonarr"], "url" | "apiKey">;
 
@@ -37,18 +37,28 @@ export async function sonarrOptions(conn: Conn = getSettings().sonarr) {
 
 let seriesCache: { at: number; list: SonarrSeries[] } | null = null;
 
-/** Main Sonarr first, then any extra instances. A series' `instance` is its index here. */
-const connOf = (i = 0): Conn => (i === 0 ? getSettings().sonarr : (getSettings().sonarrExtra[i - 1] ?? { url: "", apiKey: "" }));
+/** A series' `instance` is the address of the Sonarr it lives in (empty = the main one). */
+function connOf(instance = ""): Conn {
+  const s = getSettings();
+  if (!instance || instance === s.sonarr.url) return s.sonarr;
+  const x = s.sonarrExtra.find((e) => e.url === instance);
+  if (!x) throw new Error("That Sonarr instance was removed; reload the page");
+  return x;
+}
+
+export function forgetSeries() {
+  seriesCache = null;
+}
 
 /** Every series across all Sonarr instances. The main instance wins when the same show is in two. */
 export async function sonarrSeries(force = false): Promise<SonarrSeries[]> {
   if (!force && seriesCache && Date.now() - seriesCache.at < 5 * 60_000) return seriesCache.list;
-  const list = (await call<SonarrSeries[]>("GET", "/series")).map((x) => ({ ...x, instance: 0 }));
+  const list = (await call<SonarrSeries[]>("GET", "/series")).map((x) => ({ ...x, instance: "" }));
   const have = new Set(list.map((x) => x.tvdbId));
   const extra = getSettings().sonarrExtra;
   for (let i = 0; i < extra.length; i++) {
     try {
-      for (const x of await call<SonarrSeries[]>("GET", "/series", undefined, extra[i])) if (!have.has(x.tvdbId)) list.push({ ...x, instance: i + 1 });
+      for (const x of await call<SonarrSeries[]>("GET", "/series", undefined, extra[i])) if (!have.has(x.tvdbId)) list.push({ ...x, instance: extra[i].url });
     } catch (e) {
       console.warn(`Sonarr "${extra[i].name}" unreachable: ${(e as Error).message}`);
     }
@@ -137,7 +147,7 @@ export async function planAdd(tvdbId: number, season: number | null, firstOfMany
 
 /** Sonarr's own title search: the fallback when the community AniList -> TVDB list hasn't caught up yet. */
 export async function lookupByTitle(titles: string[], year: number | null = null) {
-  const seen = new Map<number, { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean; rank: number }>();
+  const seen = new Map<number, { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean; confident: boolean; rank: number }>();
   const owned = new Set((await sonarrSeries().catch(() => [] as SonarrSeries[])).map((x) => x.tvdbId));
   const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2));
   const want = words(titles.join(" "));
@@ -158,6 +168,8 @@ export async function lookupByTitle(titles: string[], year: number | null = null
         seasons: x.seasons.map((z) => z.seasonNumber).filter((n) => n > 0),
         overview: ((x.overview as string | undefined) ?? "").slice(0, 200) || null,
         inLibrary: owned.has(x.tvdbId),
+        // Half the words in common or more: worth offering as "Is this it?". Below that, just list them.
+        confident: overlap >= 0.5,
         rank,
       });
     }
@@ -203,7 +215,7 @@ export async function addSeries(tvdbId: number, season: number | null, opts: { m
   return { id: added.id, title: added.title, monitored: MONITOR_LABEL[monitor](season), waitingForSeason: monitor === "season" && !listed };
 }
 
-export async function setMonitored(seriesId: number, monitored: boolean, instance = 0) {
+export async function setMonitored(seriesId: number, monitored: boolean, instance = "") {
   const c = connOf(instance);
   const full = await call<SonarrSeries>("GET", `/series/${seriesId}`, undefined, c);
   await call("PUT", `/series/${seriesId}`, { ...full, monitored }, c);

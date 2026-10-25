@@ -5,7 +5,17 @@ import path from "node:path";
 // UMASK like the linuxserver images (e.g. 002 so a shared group can read the config folder).
 if (process.env.UMASK && /^[0-7]{3,4}$/.test(process.env.UMASK)) process.umask(parseInt(process.env.UMASK, 8));
 export const CONFIG_DIR = process.env.TASTEARR_CONFIG ?? "/config";
-fs.mkdirSync(CONFIG_DIR, { recursive: true });
+try {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.accessSync(CONFIG_DIR, fs.constants.W_OK);
+  // Files left by an older version that ran as root.
+  for (const f of ["tastearr.db", "tastearr.db-wal", "anime-list-full.json"]) if (fs.existsSync(path.join(CONFIG_DIR, f))) fs.accessSync(path.join(CONFIG_DIR, f), fs.constants.W_OK);
+} catch {
+  // The usual first-run problem: Docker created the folder as root, and Tastearr runs as a normal user.
+  const who = typeof process.getuid === "function" ? `${process.getuid()}:${process.getgid?.()}` : "the container user";
+  console.error(`Tastearr can't write to ${CONFIG_DIR}. Give it to the user the container runs as (${who}), e.g. on Unraid: chown -R 99:100 /mnt/user/appdata/tastearr`);
+  process.exit(1);
+}
 
 export const db = new DatabaseSync(path.join(CONFIG_DIR, "tastearr.db"));
 db.exec("PRAGMA journal_mode = WAL;");
