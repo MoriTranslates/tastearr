@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY server ./server
 COPY web ./web
 RUN npm run build && npm prune --omit=dev
 
-FROM node:24-alpine
+FROM node:26-alpine
 LABEL org.opencontainers.image.title="Tastearr" \
       org.opencontainers.image.description="Learns your anime taste and recommends next season's shows for Sonarr" \
       org.opencontainers.image.source="https://github.com/MoriTranslates/tastearr" \
