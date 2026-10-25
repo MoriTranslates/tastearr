@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
+import { promisify } from "node:util";
 import { db } from "./db.js";
+
+const scrypt = promisify(crypto.scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
 export type Pref = "love" | "ok" | "never";
 
@@ -16,17 +19,28 @@ export interface Settings {
     /** What "not into it anymore" does in Sonarr. */
     dropAction: "unmonitor" | "keep";
   };
+  radarr: {
+    url: string;
+    apiKey: string;
+    qualityProfileId: number | null;
+    rootFolderPath: string;
+    tags: number[];
+    minimumAvailability: "announced" | "inCinemas" | "released";
+    searchOnAdd: boolean;
+  };
   media: {
     type: "none" | "plex" | "jellyfin";
     url: string;
     token: string;
-    /** Jellyfin/Emby user id. Unused for Plex (the token's owner is used). */
+    /** Jellyfin/Emby user id. Unused for Plex (the token's account is used). */
     userId: string;
     /** Library section ids (Plex) or parent ids (Jellyfin) holding anime. Empty = all show libraries. */
     libraryIds: string[];
   };
+  lists: { anilistUser: string; malUser: string; malClientId: string };
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
-  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean };
+  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean };
+  display: { titleLanguage: "english" | "romaji" | "native" };
   /** Quiz genre answers. "never" genres are excluded outright. */
   genrePrefs: Record<string, Pref>;
   notify: {
@@ -39,32 +53,59 @@ export interface Settings {
     /** Number of shows in the new-season message. */
     picks: number;
     seasonAlerts: boolean;
+    /** New-episode alerts from Sonarr/Radarr imports. */
     episodeAlerts: boolean;
+    /** "Episode N is out" alerts for followed shows, from AniList's airing schedule (no Sonarr needed). */
+    airingAlerts: boolean;
   };
-  /** Address phones can reach Tastearr at, for buttons in alerts. Optional. */
+  /** Address phones and browsers reach Tastearr at (reverse proxy URL). Used for alert buttons and the Host check. */
   externalUrl: string;
-  auth: { enabled: boolean; username: string; passwordHash: string; bypassLocal: boolean };
+  /** Login is always required once an account exists. bypassLocal is an explicit opt-in. */
+  auth: { username: string; passwordHash: string; bypassLocal: boolean };
+  /** Admin API key, accepted only in the X-Api-Key header. */
   apiKey: string;
+  /** Scoped key that only works for incoming webhooks. */
+  webhookKey: string;
+  /** Identifies this install to plex.tv for the "Sign in with Plex" flow. */
+  plexClientId: string;
   secret: string;
 }
 
 const DEFAULTS: Settings = {
   sonarr: { url: "", apiKey: "", qualityProfileId: null, rootFolderPath: "", tags: [], sequelMonitor: "newSeason", searchOnAdd: true, dropAction: "unmonitor" },
+  radarr: { url: "", apiKey: "", qualityProfileId: null, rootFolderPath: "", tags: [], minimumAvailability: "released", searchOnAdd: true },
   media: { type: "none", url: "", token: "", userId: "", libraryIds: [] },
+  lists: { anilistUser: "", malUser: "", malClientId: "" },
   training: { seasons: 8, minTagRank: 60, formats: ["TV", "TV_SHORT", "ONA"], countries: ["JP"] },
-  filters: { excludeGenres: [], excludeTags: ["Kids"], hideInLibrary: false },
+  filters: { excludeGenres: [], excludeTags: ["Kids"], hideInLibrary: false, hideShorts: false },
+  display: { titleLanguage: "english" },
   genrePrefs: {},
-  notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true },
+  notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true, airingAlerts: true },
   externalUrl: "",
-  auth: { enabled: false, username: "", passwordHash: "", bypassLocal: true },
+  auth: { username: "", passwordHash: "", bypassLocal: false },
   apiKey: "",
+  webhookKey: "",
+  plexClientId: "",
   secret: "",
 };
 
-const SECRET_PATHS = ["sonarr.apiKey", "media.token", "notify.discordWebhook", "notify.ntfyToken", "notify.gotifyToken"] as const;
+const SECRET_PATHS = ["sonarr.apiKey", "radarr.apiKey", "media.token", "notify.discordWebhook", "notify.ntfyToken", "notify.gotifyToken", "lists.malClientId"] as const;
+/** Settings the browser may change through PUT /api/settings. Everything else has its own endpoint. */
+const EDITABLE = ["sonarr", "radarr", "media", "lists", "training", "filters", "display", "notify", "externalUrl", "auth.username", "auth.bypassLocal"];
+const ENUMS: Record<string, readonly string[]> = {
+  "sonarr.sequelMonitor": ["newSeason", "all"],
+  "sonarr.dropAction": ["unmonitor", "keep"],
+  "media.type": ["none", "plex", "jellyfin"],
+  "radarr.minimumAvailability": ["announced", "inCinemas", "released"],
+  "display.titleLanguage": ["english", "romaji", "native"],
+};
+const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30] };
+
 export const MASK = "••••••••";
-/** True for the mask (or a mangled copy of it): any non-printable-ASCII value can't be a real key. */
-export const isMasked = (v: unknown) => typeof v === "string" && (v === MASK || /[^ -~]/.test(v));
+/** True for the mask (or a mangled copy of it); real keys are printable ASCII. */
+export const isMasked = (v: unknown) => typeof v === "string" && (v === MASK || /^[^ -~]+$/.test(v));
+
+const rand = (n: number) => crypto.randomBytes(n).toString("hex");
 
 function merge<T>(base: T, over: unknown): T {
   if (!over || typeof over !== "object" || Array.isArray(over) || base === null || typeof base !== "object" || Array.isArray(base)) {
@@ -75,16 +116,52 @@ function merge<T>(base: T, over: unknown): T {
   return out as T;
 }
 
+/** Coerces an untrusted patch into the shape of `shape`, dropping unknown keys and wrong types. */
+function sanitize(shape: unknown, patch: unknown, path = ""): unknown {
+  if (Array.isArray(shape)) {
+    if (!Array.isArray(patch)) return undefined;
+    const numeric = path === "sonarr.tags" || path === "radarr.tags";
+    return patch.map((x) => (numeric ? Number(x) : String(x))).filter((x) => (numeric ? Number.isFinite(x) : x !== ""));
+  }
+  if (shape !== null && typeof shape === "object") {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return undefined;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+      if (!(k in (shape as object))) continue;
+      const clean = sanitize((shape as Record<string, unknown>)[k], v, path ? `${path}.${k}` : k);
+      if (clean !== undefined) out[k] = clean;
+    }
+    return out;
+  }
+  if (path === "sonarr.qualityProfileId" || path === "radarr.qualityProfileId") return patch === null || patch === "" ? null : Number.isFinite(Number(patch)) ? Number(patch) : undefined;
+  if (typeof shape === "boolean") return typeof patch === "boolean" ? patch : undefined;
+  if (typeof shape === "number") {
+    const n = Number(patch);
+    if (!Number.isFinite(n)) return undefined;
+    const r = RANGES[path];
+    return r ? Math.min(r[1], Math.max(r[0], Math.round(n))) : n;
+  }
+  if (typeof shape === "string") {
+    if (patch === null || patch === undefined) return undefined;
+    const s = String(patch).trim();
+    if (ENUMS[path] && !ENUMS[path].includes(s)) return undefined;
+    return s;
+  }
+  return undefined;
+}
+
 let cache: Settings | null = null;
 
 export function getSettings(): Settings {
   if (cache) return cache;
   const row = db.prepare("SELECT value FROM settings WHERE key = 'settings'").get() as { value: string } | undefined;
-  let s = merge(DEFAULTS, row ? JSON.parse(row.value) : {});
-  if (!s.apiKey || !s.secret) {
-    s = { ...s, apiKey: s.apiKey || crypto.randomBytes(16).toString("hex"), secret: s.secret || crypto.randomBytes(32).toString("hex") };
-    write(s);
-  }
+  const stored = row ? (JSON.parse(row.value) as Record<string, unknown>) : {};
+  let s = merge(DEFAULTS, stored);
+  // v0.1 had auth.enabled and a local bypass that defaulted on; v0.2 always requires an account.
+  if (stored.auth && "enabled" in (stored.auth as object)) s = { ...s, auth: { username: s.auth.username, passwordHash: s.auth.passwordHash, bypassLocal: false } };
+  const missing = !s.apiKey || !s.secret || !s.webhookKey || !s.plexClientId;
+  if (missing) s = { ...s, apiKey: s.apiKey || rand(16), secret: s.secret || rand(32), webhookKey: s.webhookKey || rand(16), plexClientId: s.plexClientId || crypto.randomUUID() };
+  if (missing || (stored.auth && "enabled" in (stored.auth as object))) write(s);
   cache = s;
   return s;
 }
@@ -105,48 +182,79 @@ function setPath(o: Record<string, unknown>, p: string, v: unknown) {
   cur[keys.at(-1)!] = v;
 }
 
-/** Settings as sent to the browser: secrets masked, password hash and signing secret removed. */
+/** Settings as sent to the browser: every secret masked, hashes and signing keys removed. */
 export function publicSettings() {
   const s = structuredClone(getSettings()) as unknown as Record<string, unknown>;
   for (const p of SECRET_PATHS) if (getPath(s, p)) setPath(s, p, MASK);
+  const auth = s.auth as Record<string, unknown>;
+  auth.hasPassword = !!auth.passwordHash;
+  delete auth.passwordHash;
   delete s.secret;
-  (s.auth as Record<string, unknown>).passwordHash = (s.auth as Record<string, unknown>).passwordHash ? MASK : "";
+  delete s.apiKey;
+  delete s.plexClientId;
   return s;
 }
 
-/** Applies a partial update from the browser. Masked secrets mean "unchanged". */
-export function updateSettings(patch: Record<string, unknown>, password?: string) {
+/** Applies an untrusted partial update from the browser. Masked secrets mean "unchanged". */
+export function updateSettings(patch: unknown) {
   const cur = getSettings();
-  const next = merge(cur, patch) as Settings;
+  const clean = sanitize(DEFAULTS, patch) as Record<string, unknown> | undefined;
+  const allowed: Record<string, unknown> = {};
+  for (const p of EDITABLE) {
+    const v = getPath(clean, p);
+    if (v === undefined) continue;
+    const keys = p.split(".");
+    let o = allowed;
+    for (const k of keys.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>;
+    o[keys.at(-1)!] = v;
+  }
+  const next = merge(cur, allowed) as Settings;
   for (const p of SECRET_PATHS) if (isMasked(getPath(next, p))) setPath(next as unknown as Record<string, unknown>, p, getPath(cur, p));
-  next.auth.passwordHash = password ? hashPassword(password) : cur.auth.passwordHash;
-  next.secret = cur.secret;
-  next.apiKey = cur.apiKey;
   next.sonarr.url = next.sonarr.url.replace(/\/+$/, "");
   next.media.url = next.media.url.replace(/\/+$/, "");
+  next.radarr.url = next.radarr.url.replace(/\/+$/, "");
   next.externalUrl = next.externalUrl.replace(/\/+$/, "");
   write(next);
   return next;
 }
 
-export function setGenrePrefs(prefs: Record<string, Pref>) {
-  write({ ...getSettings(), genrePrefs: prefs });
+/** Internal update that skips sanitising (server-side values such as an auto-detected key or a Plex token). */
+export function patchSettings(fn: (s: Settings) => Settings) {
+  write(fn(structuredClone(getSettings())));
 }
 
-export function regenerateApiKey() {
-  const s = { ...getSettings(), apiKey: crypto.randomBytes(16).toString("hex") };
+export function setGenrePrefs(prefs: unknown) {
+  const clean: Record<string, Pref> = {};
+  if (prefs && typeof prefs === "object") {
+    for (const [g, v] of Object.entries(prefs)) if (v === "love" || v === "ok" || v === "never") clean[g] = v;
+  }
+  write({ ...getSettings(), genrePrefs: clean });
+}
+
+export function regenerateKey(which: "apiKey" | "webhookKey") {
+  const s = { ...getSettings(), [which]: rand(16) };
   write(s);
-  return s.apiKey;
+  return s[which];
 }
 
-export function hashPassword(pw: string) {
+export async function setAccount(username: string, password: string) {
   const salt = crypto.randomBytes(16);
-  return `${salt.toString("hex")}:${crypto.scryptSync(pw, salt, 32).toString("hex")}`;
+  const hash = `${salt.toString("hex")}:${(await scrypt(password, salt, 32)).toString("hex")}`;
+  const s = getSettings();
+  // A new secret invalidates every existing session.
+  write({ ...s, auth: { ...s.auth, username, passwordHash: hash }, secret: rand(32) });
 }
 
-export function checkPassword(pw: string, stored: string) {
+export async function checkPassword(pw: string, stored: string) {
   const [salt, hash] = stored.split(":");
   if (!salt || !hash) return false;
-  const got = crypto.scryptSync(pw, Buffer.from(salt, "hex"), 32);
+  const got = await scrypt(pw, Buffer.from(salt, "hex"), 32);
   return crypto.timingSafeEqual(got, Buffer.from(hash, "hex"));
+}
+
+export function safeEqual(a: string | undefined, b: string) {
+  if (!a || !b) return false;
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
 }

@@ -1,40 +1,30 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { patchSettings } from "./settings.js";
 
 /**
- * Finds Sonarr/Radarr API keys and the Plex token from a read-only mount of the host's appdata folder
- * (default /appdata), and container addresses from an optional read-only Docker socket mount.
+ * Finds Sonarr (and Radarr, for later) from a read-only mount of their config folders, and container addresses
+ * from an optional read-only Docker socket. API keys never leave the server: the browser gets an id and picks
+ * one, and the key is copied into settings here. Plex is connected with "Sign in with Plex" instead of reading
+ * its account token from disk.
  */
 const APPDATA = process.env.TASTEARR_APPDATA ?? "/appdata";
 const DOCKER_SOCK = process.env.TASTEARR_DOCKER_SOCK ?? "/var/run/docker.sock";
 
-export interface Found {
-  app: "sonarr" | "radarr" | "plex";
+interface Found {
+  id: string;
+  app: "sonarr" | "radarr";
   folder: string;
   apiKey: string;
   port: number;
   urlBase: string;
-  /** Best guess at a reachable URL, when the Docker socket is available. */
   url: string | null;
 }
 
 function tag(xml: string, name: string) {
   return xml.match(new RegExp(`<${name}>([^<]*)</${name}>`))?.[1] ?? "";
-}
-
-function findFile(dir: string, rel: string[], depth = 2): string | null {
-  for (const r of rel) {
-    const p = path.join(dir, r);
-    if (fs.existsSync(p)) return p;
-  }
-  if (depth === 0) return null;
-  for (const e of safeReaddir(dir)) {
-    if (!e.isDirectory()) continue;
-    const hit = findFile(path.join(dir, e.name), rel, depth - 1);
-    if (hit) return hit;
-  }
-  return null;
 }
 
 function safeReaddir(dir: string) {
@@ -66,44 +56,58 @@ function dockerContainers(): Promise<Container[]> {
   });
 }
 
-function guessUrl(containers: Container[], app: string, folder: string, port: number, urlBase: string, hostIp: string | null) {
+function guessUrl(containers: Container[], app: string, folder: string, port: number, urlBase: string) {
   const key = folder.toLowerCase();
-  const c = containers.find((x) => x.Names.some((n) => n.toLowerCase().includes(key) || key.includes(n.replace(/^\//, "").toLowerCase()))) ??
+  const c =
+    containers.find((x) => x.Names.some((n) => n.replace(/^\//, "").toLowerCase() === key)) ??
+    containers.find((x) => x.Names.some((n) => n.toLowerCase().includes(app))) ??
     containers.find((x) => x.Image.toLowerCase().includes(app));
   if (!c) return null;
   const base = urlBase ? `/${urlBase.replace(/^\/+|\/+$/g, "")}` : "";
+  const hostIp = process.env.TASTEARR_HOST_IP;
   const published = c.Ports.find((p) => p.PrivatePort === port && p.PublicPort);
   if (published && hostIp) return `http://${hostIp}:${published.PublicPort}${base}`;
   const ip = Object.values(c.NetworkSettings.Networks).map((n) => n.IPAddress).find(Boolean);
   return ip ? `http://${ip}:${port}${base}` : null;
 }
 
-export async function discover(): Promise<{ appdata: boolean; docker: boolean; found: Found[] }> {
-  const appdata = fs.existsSync(APPDATA);
+/** Config folders to inspect: /appdata itself (if a single app's folder is mounted there) and its subfolders. */
+function candidates() {
+  if (!fs.existsSync(APPDATA)) return [];
+  return [{ name: path.basename(APPDATA), dir: APPDATA }, ...safeReaddir(APPDATA).filter((e) => e.isDirectory()).map((e) => ({ name: e.name, dir: path.join(APPDATA, e.name) }))];
+}
+
+async function scan(): Promise<{ appdata: boolean; docker: boolean; found: Found[] }> {
   const containers = await dockerContainers();
-  const hostIp = process.env.TASTEARR_HOST_IP ?? null;
   const found: Found[] = [];
-  for (const e of appdata ? safeReaddir(APPDATA) : []) {
-    if (!e.isDirectory()) continue;
-    const name = e.name.toLowerCase();
-    const dir = path.join(APPDATA, e.name);
-    for (const app of ["sonarr", "radarr"] as const) {
-      if (!name.includes(app)) continue;
-      const cfg = findFile(dir, ["config.xml"], 1);
-      if (!cfg) continue;
-      const xml = fs.readFileSync(cfg, "utf8");
-      const apiKey = tag(xml, "ApiKey");
-      if (!apiKey) continue;
-      const port = Number(tag(xml, "Port")) || (app === "sonarr" ? 8989 : 7878);
-      const urlBase = tag(xml, "UrlBase");
-      found.push({ app, folder: e.name, apiKey, port, urlBase, url: guessUrl(containers, app, e.name, port, urlBase, hostIp) });
-    }
-    if (name.includes("plex")) {
-      const prefs = findFile(dir, ["Library/Application Support/Plex Media Server/Preferences.xml", "Preferences.xml"], 3);
-      if (!prefs) continue;
-      const token = fs.readFileSync(prefs, "utf8").match(/PlexOnlineToken="([^"]+)"/)?.[1];
-      if (token) found.push({ app: "plex", folder: e.name, apiKey: token, port: 32400, urlBase: "", url: guessUrl(containers, "plex", e.name, 32400, "", hostIp) });
-    }
+  for (const { name, dir } of candidates()) {
+    const cfg = path.join(dir, "config.xml");
+    if (!fs.existsSync(cfg)) continue;
+    const xml = fs.readFileSync(cfg, "utf8");
+    const instance = tag(xml, "InstanceName").toLowerCase();
+    const app = instance.includes("radarr") || name.toLowerCase().includes("radarr") ? "radarr" : instance.includes("sonarr") || name.toLowerCase().includes("sonarr") ? "sonarr" : null;
+    const apiKey = tag(xml, "ApiKey");
+    if (!app || !apiKey) continue;
+    const port = Number(tag(xml, "Port")) || (app === "sonarr" ? 8989 : 7878);
+    const urlBase = tag(xml, "UrlBase");
+    const id = crypto.createHash("sha256").update(dir).digest("hex").slice(0, 12);
+    found.push({ id, app, folder: name, apiKey, port, urlBase, url: guessUrl(containers, app, name, port, urlBase) });
   }
-  return { appdata, docker: containers.length > 0, found };
+  return { appdata: fs.existsSync(APPDATA), docker: containers.length > 0, found };
+}
+
+/** What the browser sees: no keys. */
+export async function discover() {
+  const r = await scan();
+  return { ...r, found: r.found.map(({ apiKey: _k, ...f }) => ({ ...f, usable: f.app === "sonarr" })) };
+}
+
+/** Copies a discovered Sonarr's key into settings, with the URL the user confirmed. */
+export async function useDiscovered(id: string, url: string) {
+  const f = (await scan()).found.find((x) => x.id === id);
+  if (!f) throw new Error("That app is no longer detected");
+  if (f.app !== "sonarr") throw new Error("Only Sonarr is supported so far");
+  if (!/^https?:\/\//i.test(url)) throw new Error("URL must start with http:// or https://");
+  patchSettings((s) => ({ ...s, sonarr: { ...s.sonarr, url: url.replace(/\/+$/, ""), apiKey: f.apiKey } }));
+  return { ok: true };
 }

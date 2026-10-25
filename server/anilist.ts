@@ -3,46 +3,64 @@ import { db } from "./db.js";
 export type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
 export const SEASONS: Season[] = ["WINTER", "SPRING", "SUMMER", "FALL"];
 
+export interface Relation { relationType: string; node: { id: number; type: string; format: string | null } }
+
 export interface Media {
   id: number;
-  title: { romaji: string | null; english: string | null };
+  title: { romaji: string | null; english: string | null; native: string | null };
   format: string | null;
   status: string | null;
+  source: string | null;
   episodes: number | null;
   season: Season | null;
   seasonYear: number | null;
+  startDate: { year: number | null; month: number | null; day: number | null };
   countryOfOrigin: string | null;
   isAdult: boolean;
   popularity: number;
   averageScore: number | null;
   genres: string[];
-  tags: { name: string; rank: number; isGeneralSpoiler: boolean }[];
+  tags: { name: string; rank: number; isGeneralSpoiler: boolean; isMediaSpoiler: boolean }[];
   coverImage: { large: string | null; color: string | null };
   description: string | null;
   siteUrl: string;
   studios: { nodes: { name: string }[] };
+  relations: { edges: Relation[] };
+  nextAiringEpisode: { airingAt: number; episode: number } | null;
+  externalLinks: { site: string; url: string; type: string | null }[];
+  trailer: { id: string; site: string } | null;
 }
 
-const FIELDS = `id title { romaji english } format status episodes season seasonYear countryOfOrigin isAdult popularity averageScore
-  genres tags { name rank isGeneralSpoiler } coverImage { large color } description(asHtml: false) siteUrl studios(isMain: true) { nodes { name } }`;
+/** Bump when FIELDS changes so cached rows are refetched. */
+export const MEDIA_SCHEMA = 2;
+
+const FIELDS = `id title { romaji english native } format status source episodes season seasonYear startDate { year month day }
+  countryOfOrigin isAdult popularity averageScore genres tags { name rank isGeneralSpoiler isMediaSpoiler }
+  coverImage { large color } description(asHtml: false) siteUrl studios(isMain: true) { nodes { name } }
+  relations { edges { relationType node { id type format } } }
+  nextAiringEpisode { airingAt episode } externalLinks { site url type } trailer { id site }`;
 
 const ENDPOINT = "https://graphql.anilist.co";
-const MIN_GAP_MS = 800; // AniList allows 90 req/min; stay well under it
+let gapMs = 800; // adjusted from X-RateLimit-Limit (90/min normally, 30/min when AniList is degraded)
 let last = 0;
 let chain: Promise<unknown> = Promise.resolve();
 
-/** Serialised, rate-limited AniList GraphQL call that honours 429 Retry-After. */
+/** Serialised, rate-limited AniList GraphQL call that honours the rate-limit headers and 429 Retry-After. */
 function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const run = async (): Promise<T> => {
     for (let attempt = 0; ; attempt++) {
-      const wait = last + MIN_GAP_MS - Date.now();
+      const wait = last + gapMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       last = Date.now();
       const res = await fetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": "Tastearr (+https://github.com/MoriTranslates/tastearr)" },
         body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(30_000),
       });
+      const limit = Number(res.headers.get("x-ratelimit-limit"));
+      if (limit > 0) gapMs = Math.ceil(60_000 / limit) + 100;
+      if (Number(res.headers.get("x-ratelimit-remaining")) === 0) last = Date.now() + 60_000 - gapMs;
       if (res.status === 429 && attempt < 5) {
         const s = Number(res.headers.get("retry-after")) || 60;
         await new Promise((r) => setTimeout(r, s * 1000));
@@ -68,7 +86,12 @@ function store(list: Media[], season: Season | null, year: number | null) {
        season = COALESCE(excluded.season, media.season), year = COALESCE(excluded.year, media.year)`,
   );
   const now = Date.now();
-  for (const m of list) stmt.run(m.id, season, year, JSON.stringify(m), now);
+  for (const m of list) stmt.run(m.id, season, year, JSON.stringify({ ...m, _v: MEDIA_SCHEMA }), now);
+}
+
+function parse(data: string): Media | null {
+  const m = JSON.parse(data) as Media & { _v?: number };
+  return m._v === MEDIA_SCHEMA ? m : null;
 }
 
 export function seasonOf(date = new Date()): { season: Season; year: number } {
@@ -80,37 +103,43 @@ export function shiftSeason(s: { season: Season; year: number }, by: number) {
   return { season: SEASONS[((idx % 4) + 4) % 4], year: Math.floor(idx / 4) };
 }
 
-/** Season list from cache, refreshed if stale (current/upcoming: 1 day, past: 30 days). */
+/** Season list from cache, refreshed if stale (current/upcoming: 12 hours, past: 30 days). */
 export async function getSeason(season: Season, year: number, force = false): Promise<Media[]> {
   const row = db.prepare("SELECT fetched_at FROM season_fetch WHERE season = ? AND year = ?").get(season, year) as { fetched_at: number } | undefined;
   const cur = seasonOf();
   const past = year * 4 + SEASONS.indexOf(season) < cur.year * 4 + SEASONS.indexOf(cur.season);
-  const maxAge = (past ? 30 : 1) * 86_400_000;
-  if (force || !row || Date.now() - row.fetched_at > maxAge) {
-    const all: Media[] = [];
-    for (let page = 1; ; page++) {
-      const d = await gql<PageResult>(
-        `query ($page: Int, $season: MediaSeason, $year: Int) { Page(page: $page, perPage: 50) { pageInfo { hasNextPage }
-          media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) { ${FIELDS} } } }`,
-        { page, season, year },
-      );
-      all.push(...d.Page.media);
-      if (!d.Page.pageInfo.hasNextPage || page >= 10) break;
-    }
-    store(all, season, year);
-    db.prepare("INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at").run(season, year, Date.now());
+  const maxAge = past ? 30 * 86_400_000 : 12 * 3_600_000;
+  const cached = () => (db.prepare("SELECT data FROM media WHERE season = ? AND year = ?").all(season, year) as { data: string }[]).map((r) => parse(r.data));
+  if (!force && row && Date.now() - row.fetched_at <= maxAge) {
+    const list = cached();
+    if (list.every(Boolean)) return list as Media[];
   }
-  return (db.prepare("SELECT data FROM media WHERE season = ? AND year = ?").all(season, year) as { data: string }[]).map((r) => JSON.parse(r.data));
+  const all: Media[] = [];
+  for (let page = 1; ; page++) {
+    const d = await gql<PageResult>(
+      `query ($page: Int, $season: MediaSeason, $year: Int) { Page(page: $page, perPage: 50) { pageInfo { hasNextPage }
+        media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) { ${FIELDS} } } }`,
+      { page, season, year },
+    );
+    all.push(...d.Page.media);
+    if (!d.Page.pageInfo.hasNextPage || page >= 10) break;
+  }
+  const unique = [...new Map(all.map((m) => [m.id, m])).values()];
+  store(unique, season, year);
+  db.prepare("INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at").run(season, year, Date.now());
+  return unique;
 }
 
-/** Fetches (and caches) arbitrary media by id, e.g. quiz shows and feedback targets. */
+/** Fetches (and caches) media by id: quiz shows, list imports, prequels, feedback targets. */
 export async function getMediaByIds(ids: number[]): Promise<Media[]> {
   const have = new Map<number, Media>();
-  for (const id of ids) {
-    const r = db.prepare("SELECT data FROM media WHERE id = ?").get(id) as { data: string } | undefined;
-    if (r) have.set(id, JSON.parse(r.data));
+  const get = db.prepare("SELECT data FROM media WHERE id = ?");
+  for (const id of new Set(ids)) {
+    const r = get.get(id) as { data: string } | undefined;
+    const m = r && parse(r.data);
+    if (m) have.set(id, m);
   }
-  const missing = ids.filter((id) => !have.has(id));
+  const missing = [...new Set(ids)].filter((id) => !have.has(id));
   for (let i = 0; i < missing.length; i += 50) {
     const d = await gql<PageResult>(`query ($ids: [Int]) { Page(perPage: 50) { pageInfo { hasNextPage } media(id_in: $ids) { ${FIELDS} } } }`, {
       ids: missing.slice(i, i + 50),
@@ -121,20 +150,47 @@ export async function getMediaByIds(ids: number[]): Promise<Media[]> {
   return ids.map((id) => have.get(id)).filter((m): m is Media => !!m);
 }
 
-/** Most popular shows overall, used to build the quiz pool. */
-export async function getPopular(pages = 4): Promise<Media[]> {
-  const all: Media[] = [];
-  for (let page = 1; page <= pages; page++) {
-    const d = await gql<PageResult>(
-      `query ($page: Int) { Page(page: $page, perPage: 50) { pageInfo { hasNextPage }
-        media(type: ANIME, format_in: [TV, ONA], isAdult: false, sort: POPULARITY_DESC) { ${FIELDS} } } }`,
-      { page },
+/** Cached media only, never hits the network. */
+export function cachedMedia(id: number): Media | null {
+  const r = db.prepare("SELECT data FROM media WHERE id = ?").get(id) as { data: string } | undefined;
+  return r ? parse(r.data) : null;
+}
+
+/** Popular shows matching a filter, used for quiz archetype slots. */
+export async function searchPopular(filter: { genre_in?: string[]; tag_in?: string[]; source?: string; startBefore?: number }, perPage = 12): Promise<Media[]> {
+  const d = await gql<PageResult>(
+    `query ($genre_in: [String], $tag_in: [String], $source: MediaSource, $before: FuzzyDateInt, $perPage: Int) {
+      Page(perPage: $perPage) { pageInfo { hasNextPage }
+        media(type: ANIME, format_in: [TV, ONA], isAdult: false, countryOfOrigin: "JP", genre_in: $genre_in, tag_in: $tag_in,
+              source: $source, startDate_lesser: $before, sort: POPULARITY_DESC) { ${FIELDS} } } }`,
+    { genre_in: filter.genre_in, tag_in: filter.tag_in, source: filter.source, before: filter.startBefore, perPage },
+  );
+  store(d.Page.media, null, null);
+  return d.Page.media;
+}
+
+export interface ListEntry { mediaId: number; status: string; score: number; progress: number }
+
+/** A user's public AniList anime list. */
+export async function anilistUserList(userName: string): Promise<ListEntry[]> {
+  const d = await gql<{ MediaListCollection: { lists: { entries: ListEntry[] }[] } }>(
+    `query ($u: String) { MediaListCollection(userName: $u, type: ANIME) { lists { entries { mediaId status score(format: POINT_100) progress } } } }`,
+    { u: userName },
+  );
+  return d.MediaListCollection.lists.flatMap((l) => l.entries);
+}
+
+/** Episodes of the given shows that aired in a time window (unix seconds). */
+export async function airedBetween(ids: number[], from: number, to: number) {
+  const out: { mediaId: number; episode: number; airingAt: number }[] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const d = await gql<{ Page: { airingSchedules: { mediaId: number; episode: number; airingAt: number }[] } }>(
+      `query ($ids: [Int], $from: Int, $to: Int) { Page(perPage: 50) { airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) { mediaId episode airingAt } } }`,
+      { ids: ids.slice(i, i + 50), from, to },
     );
-    all.push(...d.Page.media);
-    if (!d.Page.pageInfo.hasNextPage) break;
+    out.push(...d.Page.airingSchedules);
   }
-  store(all, null, null);
-  return all;
+  return out;
 }
 
 export function allGenres(): string[] {

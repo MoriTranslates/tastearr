@@ -4,15 +4,18 @@ import { Login } from "./pages/Login";
 import { Picks } from "./pages/Picks";
 import { Quiz } from "./pages/Quiz";
 import { Settings } from "./pages/Settings";
+import { Setup } from "./pages/Setup";
 import { Shows } from "./pages/Shows";
+import { System } from "./pages/System";
 import { Taste } from "./pages/Taste";
+import { Wizard } from "./pages/Wizard";
+import { ToastProvider } from "./ui";
 
-const PAGES = [
-  { path: "/", label: "Picks" },
-  { path: "/shows", label: "My Shows" },
-  { path: "/taste", label: "Taste" },
-  { path: "/quiz", label: "Quiz" },
-  { path: "/settings", label: "Settings" },
+const NAV = [
+  { path: "/", label: "Picks", icon: "★" },
+  { path: "/shows", label: "My Shows", icon: "▶" },
+  { path: "/taste", label: "Taste", icon: "♥" },
+  { path: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
 
 export function navigate(path: string) {
@@ -20,61 +23,98 @@ export function navigate(path: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+export function Link({ to, children, className }: { to: string; children: React.ReactNode; className?: string }) {
+  return (
+    <a href={to} className={className} onClick={(e) => (e.preventDefault(), navigate(to))}>
+      {children}
+    </a>
+  );
+}
+
 export function App() {
   const [path, setPath] = useState(location.pathname);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const refreshStatus = useCallback(() => api<Status>("/status").then(setStatus).catch((e) => setError(e.message)), []);
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus(await api<Status>("/status"));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
 
   useEffect(() => {
-    refreshStatus();
-    const onPop = () => setPath(location.pathname);
-    const onLogout = () => refreshStatus();
+    void refreshStatus();
+    const onPop = () => {
+      setPath(location.pathname);
+      document.getElementById("main")?.focus();
+    };
+    const onAuth = () => void refreshStatus();
     window.addEventListener("popstate", onPop);
-    window.addEventListener("tastearr:logout", onLogout);
+    window.addEventListener("tastearr:auth", onAuth);
     return () => {
       window.removeEventListener("popstate", onPop);
-      window.removeEventListener("tastearr:logout", onLogout);
+      window.removeEventListener("tastearr:auth", onAuth);
     };
   }, [refreshStatus]);
 
-  if (error) return <div className="center-msg">Can't reach Tastearr: {error}</div>;
+  if (error && !status)
+    return (
+      <div className="center-msg">
+        <p>Can't reach Tastearr: {error}</p>
+        <button onClick={() => void refreshStatus()}>Try again</button>
+      </div>
+    );
   if (!status) return <div className="center-msg">Loading…</div>;
-  if (status.authRequired && !status.loggedIn) return <Login onDone={refreshStatus} />;
+  if (status.setupRequired) return <Setup onDone={refreshStatus} />;
+  if (!status.loggedIn) return <Login onDone={refreshStatus} />;
 
-  const needsSetup = !status.sonarr && !status.quizAnswers;
-  const page = PAGES.find((p) => p.path === path) ?? PAGES[0];
+  // Nothing connected yet: the picks page has nothing to learn from, so show the setup guide instead.
+  const noSources = !status.sonarr && !status.radarr && !status.media && !status.lists && !status.quizAnswers;
+  const page = path === "/setup" || (noSources && path === "/") ? "setup" : path === "/quiz" ? "quiz" : path === "/system" ? "system" : NAV.find((n) => n.path === path)?.path ?? "/";
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <a className="brand" href="/" onClick={(e) => (e.preventDefault(), navigate("/"))}>
-          <img src="/favicon.svg" alt="" width={28} height={28} />
-          <span>Tastearr</span>
+    <ToastProvider>
+      <div className="app">
+        <a className="skip" href="#main">
+          Skip to content
         </a>
-        <nav>
-          {PAGES.map((p) => (
-            <a key={p.path} href={p.path} className={p.path === page.path ? "active" : ""} onClick={(e) => (e.preventDefault(), navigate(p.path))}>
-              {p.label}
-            </a>
+        <header className="topbar">
+          <Link to="/" className="brand">
+            <img src="/favicon.svg" alt="" width={28} height={28} />
+            <span>Tastearr</span>
+          </Link>
+          <nav className="topnav" aria-label="Main">
+            {NAV.map((n) => (
+              <Link key={n.path} to={n.path} className={n.path === page ? "active" : ""}>
+                {n.label}
+              </Link>
+            ))}
+          </nav>
+        </header>
+        <main id="main" tabIndex={-1}>
+          {page === "setup" && <Wizard status={status} onDone={refreshStatus} />}
+          {page === "/" && <Picks status={status} />}
+          {page === "/shows" && <Shows status={status} />}
+          {page === "/taste" && <Taste />}
+          {page === "quiz" && <Quiz onDone={refreshStatus} />}
+          {page === "/settings" && <Settings status={status} onSaved={refreshStatus} />}
+          {page === "system" && <System />}
+        </main>
+        <footer className="foot">
+          Tastearr v{status.version} · data from <a href="https://anilist.co">AniList</a> · <Link to="/system">System</Link> · GPL-3.0
+        </footer>
+        <nav className="tabbar" aria-label="Main">
+          {NAV.map((n) => (
+            <Link key={n.path} to={n.path} className={n.path === page ? "active" : ""}>
+              <span aria-hidden="true">{n.icon}</span>
+              {n.label}
+            </Link>
           ))}
         </nav>
-      </header>
-      <main>
-        {needsSetup && page.path === "/" && (
-          <div className="banner">
-            New here? <a href="/settings" onClick={(e) => (e.preventDefault(), navigate("/settings"))}>Connect Sonarr and Plex/Jellyfin</a> so Tastearr can learn from your
-            library, or <a href="/quiz" onClick={(e) => (e.preventDefault(), navigate("/quiz"))}>take the taste quiz</a>.
-          </div>
-        )}
-        {page.path === "/" && <Picks status={status} />}
-        {page.path === "/shows" && <Shows />}
-        {page.path === "/taste" && <Taste />}
-        {page.path === "/quiz" && <Quiz />}
-        {page.path === "/settings" && <Settings onSaved={refreshStatus} />}
-      </main>
-      <footer className="foot">Tastearr v{status.version} · data from AniList · GPL-3.0</footer>
-    </div>
+      </div>
+    </ToastProvider>
   );
 }

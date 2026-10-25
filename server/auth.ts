@@ -1,32 +1,61 @@
 import crypto from "node:crypto";
 import net from "node:net";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { getSettings } from "./settings.js";
+import { getSettings, safeEqual } from "./settings.js";
 
 export const COOKIE = "tastearr_session";
 const TTL_MS = 30 * 86_400_000;
 
-function sign(payload: string) {
-  return crypto.createHmac("sha256", getSettings().secret).update(payload).digest("base64url");
+declare module "fastify" {
+  interface FastifyContextConfig {
+    /** Route checks its own credentials (webhooks, signed action links). */
+    public?: boolean;
+    /** Reachable before an account exists. */
+    setup?: boolean;
+  }
 }
+
+/** TRUST_PROXY: a hop count or a comma-separated list of proxy IPs/CIDRs. "true" is refused (it trusts any X-Forwarded-For). */
+export function trustProxyOption(): number | string[] | false {
+  const v = (process.env.TRUST_PROXY ?? "").trim();
+  if (!v || v === "false") return false;
+  if (v === "true") {
+    console.warn("TRUST_PROXY=true is not allowed (anyone could fake their IP). Use a hop count or your proxy's IP/CIDR, e.g. TRUST_PROXY=172.18.0.0/16");
+    return false;
+  }
+  if (/^\d+$/.test(v)) return Number(v);
+  return v.split(",").map((x) => x.trim()).filter(Boolean);
+}
+const PROXY_TRUSTED = trustProxyOption() !== false;
+
+const hmac = (data: string) => crypto.createHmac("sha256", getSettings().secret).update(data).digest("base64url");
 
 export function makeSession(username: string) {
   const payload = `${Buffer.from(username).toString("base64url")}.${Date.now() + TTL_MS}`;
-  return `${payload}.${sign(payload)}`;
+  return `${payload}.${hmac(`session:${payload}`)}`;
 }
 
 function validSession(token: string | undefined) {
   if (!token) return false;
   const i = token.lastIndexOf(".");
+  if (i < 0) return false;
   const payload = token.slice(0, i);
-  const sig = token.slice(i + 1);
-  const expected = sign(payload);
-  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  if (!safeEqual(token.slice(i + 1), hmac(`session:${payload}`))) return false;
   const [user, exp] = payload.split(".");
   return Number(exp) > Date.now() && Buffer.from(user, "base64url").toString() === getSettings().auth.username;
 }
 
-export function isLocal(ip: string) {
+/** Signed, expiring link for one action on one show (used by phone alert buttons). */
+export function signAction(action: string, id: number, ttlMs = 14 * 86_400_000) {
+  const exp = Date.now() + ttlMs;
+  return { exp, sig: hmac(`action:${action}:${id}:${exp}`) };
+}
+
+export function verifyAction(action: string, id: number, exp: number, sig: string) {
+  return exp > Date.now() && safeEqual(sig, hmac(`action:${action}:${id}:${exp}`));
+}
+
+function isPrivateIp(ip: string) {
   const v4 = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
   if (net.isIPv4(v4)) {
     const [a, b] = v4.split(".").map(Number);
@@ -35,24 +64,81 @@ export function isLocal(ip: string) {
   return ip === "::1" || /^f[cd]/i.test(ip) || /^fe80:/i.test(ip);
 }
 
-export function authState(req: FastifyRequest) {
-  const a = getSettings().auth;
-  const required = a.enabled && !!a.passwordHash;
-  if (!required) return { required: false, ok: true };
-  if (a.bypassLocal && isLocal(req.ip)) return { required: true, ok: true, local: true };
-  const key = (req.headers["x-api-key"] as string | undefined) ?? (req.query as Record<string, string | undefined>).apikey;
-  if (key && key === getSettings().apiKey) return { required: true, ok: true };
-  return { required: true, ok: validSession(req.cookies[COOKIE]) };
+const FORWARD_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+
+/**
+ * "Disabled for local addresses": the request must come from a private IP, and must not have passed through
+ * an untrusted proxy (a reverse proxy or tunnel would otherwise make the whole internet look local).
+ */
+function isLocalRequest(req: FastifyRequest) {
+  if (!PROXY_TRUSTED && FORWARD_HEADERS.some((h) => req.headers[h])) return false;
+  return isPrivateIp(req.ip);
 }
 
-/** onRequest hook: everything under /api needs auth except status/login and the webhook (which checks its key itself). */
-export async function guard(req: FastifyRequest, reply: FastifyReply) {
-  const url = req.url.split("?")[0];
-  if (!url.startsWith("/api/") || url === "/api/status" || url === "/api/auth/login") return;
-  if (url.startsWith("/api/webhook/")) {
-    const key = (req.query as Record<string, string | undefined>).apikey ?? req.headers["x-api-key"];
-    if (key !== getSettings().apiKey) return reply.code(401).send({ error: "Bad or missing apikey" });
-    return;
+/** Guards against DNS rebinding: a local bypass only counts when the browser addressed us by IP or a LAN name. */
+function hostAllowed(req: FastifyRequest) {
+  const host = (req.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "").toLowerCase();
+  if (!host) return false;
+  if (net.isIP(host) || host === "localhost" || !host.includes(".") || host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".home.arpa")) return true;
+  const ext = getSettings().externalUrl;
+  if (ext) {
+    try {
+      if (new URL(ext).hostname.toLowerCase() === host) return true;
+    } catch {
+      /* ignore bad externalUrl */
+    }
   }
-  if (!authState(req).ok) return reply.code(401).send({ error: "Login required" });
+  return (process.env.TASTEARR_ALLOWED_HOSTS ?? "").split(",").map((x) => x.trim().toLowerCase()).includes(host);
+}
+
+/** Blocks cross-site form posts: state-changing browser requests must carry our header and a same-origin Origin. */
+export function csrfOk(req: FastifyRequest) {
+  if (req.method === "GET" || req.method === "HEAD") return true;
+  if (req.headers["x-tastearr"] !== "1") return false;
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+export function authState(req: FastifyRequest) {
+  const a = getSettings().auth;
+  const setupRequired = !a.passwordHash;
+  if (setupRequired) return { setupRequired, ok: false, via: null };
+  if (safeEqual(req.headers["x-api-key"] as string | undefined, getSettings().apiKey)) return { setupRequired, ok: true, via: "apikey" as const };
+  if (validSession(req.cookies[COOKIE])) return { setupRequired, ok: true, via: "session" as const };
+  if (a.bypassLocal && isLocalRequest(req) && hostAllowed(req)) return { setupRequired, ok: true, via: "local" as const };
+  return { setupRequired, ok: false, via: null };
+}
+
+/** onRequest hook. Decides on the matched route pattern, never the raw URL, and denies /api by default. */
+export async function guard(req: FastifyRequest, reply: FastifyReply) {
+  const route = req.routeOptions.url;
+  if (!route || !route.startsWith("/api/")) return; // static files / SPA fallback
+  const cfg = req.routeOptions.config ?? {};
+  if (cfg.public) return;
+  if (cfg.setup) return; // status, login and first-run setup check their own preconditions
+  const st = authState(req);
+  if (st.setupRequired) return reply.code(401).send({ error: "Create an account first", setupRequired: true });
+  if (!st.ok) return reply.code(401).send({ error: "Login required" });
+  if (st.via !== "apikey" && !csrfOk(req)) return reply.code(403).send({ error: "Cross-site request blocked" });
+}
+
+// Simple in-memory login throttle: 10 attempts per 5 minutes per IP.
+const attempts = new Map<string, { n: number; reset: number }>();
+export function loginAllowed(ip: string) {
+  const now = Date.now();
+  const a = attempts.get(ip);
+  if (!a || a.reset < now) {
+    attempts.set(ip, { n: 1, reset: now + 5 * 60_000 });
+    return true;
+  }
+  a.n++;
+  return a.n <= 10;
+}
+export function loginSucceeded(ip: string) {
+  attempts.delete(ip);
 }

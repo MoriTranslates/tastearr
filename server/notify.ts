@@ -14,12 +14,12 @@ export interface Message {
 }
 
 async function check(res: Response, who: string) {
-  if (!res.ok) throw new Error(`${who} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) throw new Error(`${who} failed (HTTP ${res.status})`);
 }
 
 async function sendDiscord(webhook: string, m: Message) {
   const embed = { title: m.title, description: m.body, url: m.url, color: 0x8b5cf6, thumbnail: m.image ? { url: m.image } : undefined };
-  await check(await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Tastearr", embeds: [embed] }) }), "Discord");
+  await check(await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Tastearr", embeds: [embed] }), signal: AbortSignal.timeout(20_000) }), "Discord");
 }
 
 async function sendNtfy(topicUrl: string, token: string, m: Message) {
@@ -35,7 +35,7 @@ async function sendNtfy(topicUrl: string, token: string, m: Message) {
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  await check(await fetch(u.origin, { method: "POST", headers, body: JSON.stringify(body) }), "ntfy");
+  await check(await fetch(u.origin, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }), "ntfy");
 }
 
 async function sendGotify(url: string, token: string, m: Message) {
@@ -45,7 +45,10 @@ async function sendGotify(url: string, token: string, m: Message) {
     priority: 5,
     extras: { "client::notification": { click: m.url ? { url: m.url } : undefined, bigImageUrl: m.image ?? undefined } },
   };
-  await check(await fetch(`${url.replace(/\/+$/, "")}/message?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "Gotify");
+  await check(
+    await fetch(`${url.replace(/\/+$/, "")}/message`, { method: "POST", headers: { "Content-Type": "application/json", "X-Gotify-Key": token }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }),
+    "Gotify",
+  );
 }
 
 /** Sends to every configured channel. Returns the channels that worked; throws only if all failed. */
