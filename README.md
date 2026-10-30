@@ -148,3 +148,8 @@ Tastearr is free and open source. If it's useful to you, you can support develop
 ## License
 
 [GPL-3.0](LICENSE), the same licence Sonarr uses.
+
+## More from MoriTranslates
+
+- **[AnimeArr](https://github.com/MoriTranslates/animearr)**: an anime-first *arr that finds, grabs and imports anime itself (smart search, anime numbering, sub/dub-aware). Tastearr keeps working on its own with Sonarr/Radarr; AnimeArr users will also get its picks built in.
+- **[RPG Maker Translator](https://github.com/MoriTranslates/rpgmaker-translator)**: translate Japanese games with a local LLM.
