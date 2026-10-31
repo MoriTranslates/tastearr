@@ -8,6 +8,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/MoriTranslates/tastearr/issues</Support>
   <Project>https://github.com/MoriTranslates/tastearr</Project>
+  <TemplateURL>https://raw.githubusercontent.com/MoriTranslates/tastearr/main/unraid/tastearr.xml</TemplateURL>
   <Overview>Tastearr learns your anime taste from Sonarr, Radarr, Plex/Jellyfin watch history, your AniList/MAL list or a quick quiz, then ranks each new season's anime for you: continuing shows, new shows, shorts and movies, a weekly schedule that fills your light days, and where each show streams. Add picks to Sonarr/Radarr in one click, or just follow shows and get "episode is out" alerts on your phone (ntfy, Gotify, Discord).</Overview>
   <Category>MediaApp:Video Tools:</Category>
   <WebUI>http://[IP]:[PORT:8383]/</WebUI>
