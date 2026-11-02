@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 import { db } from "./db.js";
+import { checkOutbound, OutboundError } from "./outbound.js";
 
 const scrypt = promisify(crypto.scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
@@ -120,6 +121,15 @@ const ENUMS: Record<string, readonly string[]> = {
   "display.titleLanguage": ["english", "romaji", "native"],
   mode: ["server", "stream", ""],
 };
+/** Addresses Tastearr calls, checked when they change (externalUrl is only put in links, so it just needs http(s)). */
+const OUTBOUND_URLS: [string, string][] = [
+  ["sonarr.url", "The Sonarr address"],
+  ["radarr.url", "The Radarr address"],
+  ["media.url", "The media server address"],
+  ["notify.discordWebhook", "The Discord webhook"],
+  ["notify.ntfyUrl", "The ntfy address"],
+  ["notify.gotifyUrl", "The Gotify address"],
+];
 const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30], "notify.airingDelayMin": [0, 1440], "autoAdd.minMatch": [50, 100], "autoAdd.maxPerSeason": [1, 50] };
 
 export const MASK = "••••••••";
@@ -244,6 +254,12 @@ export function updateSettings(patch: unknown) {
     if (keptOld && norm(getPath(next, u)) !== norm(getPath(cur, u))) setPath(next as unknown as Record<string, unknown>, k, "");
   }
   next.externalUrl = next.externalUrl.replace(/\/+$/, "");
+  // Only addresses that changed: an old value saved before these checks shouldn't block saving anything else.
+  for (const [p, what] of OUTBOUND_URLS) {
+    const v = String(getPath(next, p) ?? "");
+    if (v && v !== getPath(cur, p)) checkOutbound(v, what);
+  }
+  if (next.externalUrl && next.externalUrl !== cur.externalUrl && !/^https?:\/\/[^/]/i.test(next.externalUrl)) throw new OutboundError("The external address must start with http:// or https://");
   write(next);
   return next;
 }
@@ -296,9 +312,9 @@ export async function checkPassword(pw: string, stored: string) {
   return want.length === got.length && crypto.timingSafeEqual(got, want);
 }
 
+/** Constant-time comparison. Both sides are hashed first, so not even the length of the secret leaks through timing. */
 export function safeEqual(a: string | undefined, b: string) {
-  if (!a || !b) return false;
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && crypto.timingSafeEqual(x, y);
+  if (typeof a !== "string" || !a || !b) return false;
+  const digest = (v: string) => crypto.createHash("sha256").update(v).digest();
+  return crypto.timingSafeEqual(digest(a), digest(b));
 }

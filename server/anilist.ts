@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { db, transaction } from "./db.js";
 
 export type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
 export const SEASONS: Season[] = ["WINTER", "SPRING", "SUMMER", "FALL"];
@@ -82,14 +82,16 @@ function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
 
 type PageResult = { Page: { pageInfo: { hasNextPage: boolean }; media: Media[] } };
 
-function store(list: Media[], season: Season | null, year: number | null) {
+export function store(list: Media[], season: Season | null, year: number | null) {
   const stmt = db.prepare(
     `INSERT INTO media (id, season, year, data, fetched_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at,
        season = COALESCE(excluded.season, media.season), year = COALESCE(excluded.year, media.year)`,
   );
   const now = Date.now();
-  for (const m of list) stmt.run(m.id, season, year, JSON.stringify({ ...m, _v: MEDIA_SCHEMA }), now);
+  transaction(() => {
+    for (const m of list) stmt.run(m.id, season, year, JSON.stringify({ ...m, _v: MEDIA_SCHEMA }), now);
+  });
 }
 
 function parse(data: string): Media | null {
@@ -128,10 +130,12 @@ export async function getSeason(season: Season, year: number, force = false): Pr
     if (!d.Page.pageInfo.hasNextPage || page >= 10) break;
   }
   const unique = [...new Map(all.map((m) => [m.id, m])).values()];
-  store(unique, season, year);
-  // Shows AniList moved out of this season (or deleted) must not keep the old tag, or the cache never validates.
-  if (unique.length) db.prepare(`UPDATE media SET season = NULL, year = NULL WHERE season = ? AND year = ? AND id NOT IN (${unique.map(() => "?").join(",")})`).run(season, year, ...unique.map((m) => m.id));
-  db.prepare("INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at").run(season, year, Date.now());
+  transaction(() => {
+    store(unique, season, year);
+    // Shows AniList moved out of this season (or deleted) must not keep the old tag, or the cache never validates.
+    if (unique.length) db.prepare(`UPDATE media SET season = NULL, year = NULL WHERE season = ? AND year = ? AND id NOT IN (${unique.map(() => "?").join(",")})`).run(season, year, ...unique.map((m) => m.id));
+    db.prepare("INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at").run(season, year, Date.now());
+  });
   return unique;
 }
 

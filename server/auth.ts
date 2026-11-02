@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import net from "node:net";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { db } from "./db.js";
 import { getSettings, safeEqual } from "./settings.js";
 
 export const COOKIE = "tastearr_session";
@@ -16,33 +17,49 @@ declare module "fastify" {
 }
 
 /** TRUST_PROXY: a hop count or a comma-separated list of proxy IPs/CIDRs. "true" is refused (it trusts any X-Forwarded-For). */
+let warnedTrue = false;
 export function trustProxyOption(): number | string[] | false {
   const v = (process.env.TRUST_PROXY ?? "").trim();
   if (!v || v === "false") return false;
   if (v === "true") {
-    console.warn("TRUST_PROXY=true is not allowed (anyone could fake their IP). Use a hop count or your proxy's IP/CIDR, e.g. TRUST_PROXY=172.18.0.0/16");
+    if (!warnedTrue) console.warn("TRUST_PROXY=true is not allowed (anyone could fake their IP). Use a hop count or your proxy's IP/CIDR, e.g. TRUST_PROXY=172.18.0.0/16");
+    warnedTrue = true;
     return false;
   }
   if (/^\d+$/.test(v)) return Number(v);
   return v.split(",").map((x) => x.trim()).filter(Boolean);
 }
+/** At startup; isLocalRequest re-reads the variable so tests can change it. */
 export const PROXY_TRUSTED = trustProxyOption() !== false;
 
 const hmac = (data: string) => crypto.createHmac("sha256", getSettings().secret).update(data).digest("base64url");
 
 export function makeSession(username: string) {
-  const payload = `${Buffer.from(username).toString("base64url")}.${Date.now() + TTL_MS}`;
+  // The random part makes every login's cookie unique, so logging out one device doesn't revoke another's.
+  const payload = `${Buffer.from(username).toString("base64url")}.${Date.now() + TTL_MS}.${crypto.randomBytes(9).toString("base64url")}`;
   return `${payload}.${hmac(`session:${payload}`)}`;
 }
 
-function validSession(token: string | undefined) {
+const tokenHash = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
+
+export function validSession(token: string | undefined) {
   if (!token) return false;
   const i = token.lastIndexOf(".");
   if (i < 0) return false;
   const payload = token.slice(0, i);
   if (!safeEqual(token.slice(i + 1), hmac(`session:${payload}`))) return false;
   const [user, exp] = payload.split(".");
-  return Number(exp) > Date.now() && Buffer.from(user, "base64url").toString() === getSettings().auth.username;
+  if (!(Number(exp) > Date.now() && Buffer.from(user, "base64url").toString() === getSettings().auth.username)) return false;
+  return !db.prepare("SELECT 1 FROM revoked_sessions WHERE hash = ?").get(tokenHash(token));
+}
+
+/** Logout: the cookie stops working on the server too, not just in this browser (a copied cookie can't be reused). */
+export function revokeSession(token: string | undefined) {
+  if (!token || !validSession(token)) return false;
+  const exp = Number(token.slice(0, token.lastIndexOf(".")).split(".")[1]);
+  db.prepare("DELETE FROM revoked_sessions WHERE exp < ?").run(Date.now());
+  db.prepare("INSERT OR IGNORE INTO revoked_sessions (hash, exp) VALUES (?, ?)").run(tokenHash(token), exp);
+  return true;
 }
 
 /** Signed, expiring link for one action on one show (used by phone alert buttons). */
@@ -71,8 +88,44 @@ const FORWARD_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connec
  * an untrusted proxy (a reverse proxy or tunnel would otherwise make the whole internet look local).
  */
 export function isLocalRequest(req: FastifyRequest) {
-  if (!PROXY_TRUSTED && FORWARD_HEADERS.some((h) => req.headers[h])) return false;
-  return isPrivateIp(req.ip);
+  const trust = trustProxyOption();
+  if (trust === false && FORWARD_HEADERS.some((h) => req.headers[h])) return false;
+  // A hop-count TRUST_PROXY trusts whatever is in front blindly (a forged X-Forwarded-For would read as local).
+  if (typeof trust === "number") return false;
+  return isHomeNetwork(req.ip) && !isProxyPeer(req.socket?.remoteAddress ?? "");
+}
+
+const v4 = (ip: string) => (ip.startsWith("::ffff:") ? ip.slice(7) : ip);
+export function inCidr(ip: string, cidr: string) {
+  const [base, bits] = cidr.split("/");
+  const a = v4(ip);
+  if (!net.isIPv4(a) || !net.isIPv4(base)) return false;
+  const n = (x: string) => x.split(".").reduce((acc, o) => (acc << 8) + Number(o), 0) >>> 0;
+  const len = bits === undefined ? 32 : Number(bits);
+  const mask = len === 0 ? 0 : (~0 << (32 - len)) >>> 0;
+  return (n(a) & mask) === (n(base) & mask);
+}
+
+/**
+ * The home network, for the "disabled for local addresses" bypass and for claiming a fresh install: 10/8, 192.168/16
+ * and IPv6 ULA/link-local by default. 172.16/12 (Docker's own networks: Docker's NAT gateway or docker-proxy, e.g. for
+ * IPv6 or Docker Desktop, would make internet requests arrive from 172.17.0.1) and loopback (a tunnel or proxy on the
+ * same host) never count, unless TASTEARR_LOCAL_NETWORKS lists them (comma-separated IPv4 CIDRs).
+ */
+export function isHomeNetwork(ip: string) {
+  const custom = (process.env.TASTEARR_LOCAL_NETWORKS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (custom.length) return custom.some((c) => inCidr(ip, c));
+  const a = v4(ip);
+  if (net.isIPv4(a)) return inCidr(a, "10.0.0.0/8") || inCidr(a, "192.168.0.0/16");
+  return /^f[cd]/i.test(ip) || /^fe[89ab][0-9a-f]:/i.test(ip);
+}
+
+/** The socket peer is a loopback or a trusted proxy: then it isn't the user's device. */
+function isProxyPeer(peer: string) {
+  const p = v4(peer);
+  if (p.startsWith("127.") || peer === "::1") return true;
+  const t = trustProxyOption();
+  return Array.isArray(t) && t.some((c) => (c.includes("/") ? inCidr(p, c) : c === p || c === peer));
 }
 
 /**

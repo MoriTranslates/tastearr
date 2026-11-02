@@ -95,6 +95,14 @@ async function flush(tvdbId: number) {
   }).catch((e) => console.warn("Episode alert failed:", (e as Error).message));
 }
 
+/** Sends every batch still waiting (on shutdown, so a restart doesn't swallow "new episode" alerts). */
+export async function flushPending() {
+  const ids = [...pending.keys()];
+  for (const id of ids) clearTimeout(pending.get(id)!.timer);
+  await Promise.all(ids.map((id) => flush(id)));
+  return ids.length;
+}
+
 interface RadarrWebhook {
   eventType: string;
   isUpgrade?: boolean;

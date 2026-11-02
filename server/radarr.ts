@@ -1,3 +1,4 @@
+import { checkOutbound } from "./outbound.js";
 import { getSettings, type Settings } from "./settings.js";
 
 export interface RadarrMovie { id: number; tmdbId: number; title: string; hasFile: boolean; monitored: boolean; [k: string]: unknown }
@@ -6,7 +7,7 @@ type Conn = Pick<Settings["radarr"], "url" | "apiKey">;
 
 async function call<T>(method: string, path: string, body?: unknown, conn: Conn = getSettings().radarr): Promise<T> {
   if (!conn.url || !conn.apiKey) throw new Error("Radarr is not configured");
-  if (!/^https?:\/\//i.test(conn.url)) throw new Error("Radarr URL must start with http:// or https://");
+  checkOutbound(conn.url, "The Radarr address");
   const res = await fetch(`${conn.url}/api/v3${path}`, {
     method,
     headers: { "X-Api-Key": conn.apiKey, "Content-Type": "application/json" },
