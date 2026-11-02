@@ -36,10 +36,19 @@ export const reply = (res: http.ServerResponse, status: number, body: unknown, h
   res.end(text);
 };
 
-/** Makes `AbortSignal.timeout` fire after `ms` so a hung server fails a test in milliseconds, not a minute. */
+/**
+ * Makes `AbortSignal.timeout` fire after `ms` so a hung server fails a test in milliseconds, not a minute. The signal
+ * is driven by an ordinary (ref'd) timer: whether Node's own AbortSignal.timeout timer keeps the event loop alive
+ * differs between Node versions, and a test whose only pending work is that timer (a mocked fetch that never answers)
+ * ended with "Promise resolution is still pending but the event loop has already resolved" on Node 22.23.
+ */
 export function shortTimeouts(ms = 150) {
   const real = AbortSignal.timeout;
-  AbortSignal.timeout = () => real.call(AbortSignal, ms);
+  AbortSignal.timeout = () => {
+    const c = new AbortController();
+    setTimeout(() => c.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), ms);
+    return c.signal;
+  };
   return () => void (AbortSignal.timeout = real);
 }
 
