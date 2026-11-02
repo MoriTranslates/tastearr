@@ -34,18 +34,30 @@ test("a v0.6.0 database opens with all data intact and the schema version unchan
   assert.deepEqual([...feedback.quizAnswers()], [[154587, "loved"]]);
   assert.deepEqual([...library.droppedSet()], [424536]);
   assert.equal(library.seasonAnnounced("WINTER", 2025), true);
-  assert.deepEqual(lists.listEntries().map((e) => [e.source, e.id, e.score]), [
-    ["anilist", 154587, 90],
-    ["mal", 52991, null],
-  ]);
+  assert.deepEqual(
+    lists.listEntries().map((e) => [e.source, e.id, e.score]),
+    [
+      ["anilist", 154587, 90],
+      ["mal", 52991, null],
+    ],
+  );
   assert.deepEqual(following.followedIds(), [5]);
   assert.equal(following.announcedChecker()(5, 2), true);
-  assert.deepEqual(mapping.mappingOverrides().map((o) => ({ ...o })), [{ anilist_id: 99, tvdb_id: 123456, season: null }]);
+  assert.deepEqual(
+    mapping.mappingOverrides().map((o) => ({ ...o })),
+    [{ anilist_id: 99, tvdb_id: 123456, season: null }],
+  );
   assert.equal((autoadd.autoAddHistory()[0] as { title: string }).title, 'Re:ZERO "S3" & more');
   assert.equal(sessions.isRevoked("abc123"), true);
   assert.equal(jobs.listJobs()[0].detail, "Learned from 120 shows");
   // The cache: a current-schema row with CJK text reads back; an old-schema row is treated as missing, not as an error.
   assert.equal(media.cachedMedia(154587)!.title.native, "葬送のフリーレン");
   assert.equal(media.cachedMedia(8), null);
-  assert.deepEqual(media.cachedSeason("FALL", 2023).map((m) => m?.id ?? null).sort(), [154587, null]);
+  assert.deepEqual(
+    media
+      .cachedSeason("FALL", 2023)
+      .map((m) => m?.id ?? null)
+      .sort(),
+    [154587, null],
+  );
 });

@@ -141,7 +141,10 @@ describe("Jellyfin", () => {
   test("watch states: favourite counts as 10, unwatched has no season request, specials without index skipped", async () => {
     mode = (req, res) => reply(res, 200, req.path.startsWith("/Shows/") ? jfSeasons : jfSeries);
     const m = await jellyfinWatchStates(jf(), ["v1"]);
-    assert.deepEqual([...m.keys()].sort((a, b) => a - b), [999, 424536]);
+    assert.deepEqual(
+      [...m.keys()].sort((a, b) => a - b),
+      [999, 424536],
+    );
     const f = m.get(424536)!;
     assert.equal(f.title, "葬送のフリーレン");
     assert.equal(f.watched, 12);

@@ -29,7 +29,12 @@ beforeEach(() => {
 });
 afterEach(() => void (globalThis.setTimeout = realSetTimeout));
 
-const hdr = (h: Record<string, string> = {}) => ({ "Content-Type": "application/json", "x-ratelimit-limit": "90", "x-ratelimit-remaining": "80", ...h });
+const hdr = (h: Record<string, string> = {}) => ({
+  "Content-Type": "application/json",
+  "x-ratelimit-limit": "90",
+  "x-ratelimit-remaining": "80",
+  ...h,
+});
 const reply = (body: unknown, status = 200, h: Record<string, string> = {}) =>
   new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: hdr(h) });
 
@@ -39,7 +44,10 @@ describe("AniList", () => {
     const m = mockFetch(() => reply(page(n++ === 0 ? [cjkMedia, media(2)] : [media(2), media(3)], n === 1)));
     try {
       const list = await fetchSeason("WINTER", 2030);
-      assert.deepEqual(list.map((x) => x.id), [154587, 2, 3]);
+      assert.deepEqual(
+        list.map((x) => x.id),
+        [154587, 2, 3],
+      );
       assert.equal(list[0].title.native, "葬送のフリーレン");
       assert.equal(m.calls.length, 2);
       const v = (m.calls[0].body as { variables: unknown }).variables;
@@ -102,7 +110,10 @@ describe("AniList", () => {
     for (const code of [401, 404]) {
       m = mockFetch(() => reply("<h1>Nope</h1>", code));
       try {
-        await assert.rejects(searchTitle("x"), (e: Error) => e.message.includes(`HTTP ${code}`) && e.message.includes("Nope") && !e.message.includes("<h1>"));
+        await assert.rejects(
+          searchTitle("x"),
+          (e: Error) => e.message.includes(`HTTP ${code}`) && e.message.includes("Nope") && !e.message.includes("<h1>"),
+        );
       } finally {
         m.restore();
       }
@@ -142,7 +153,10 @@ describe("AniList", () => {
   test("user list: all lists flattened; a private or missing user surfaces AniList's message", async () => {
     let m = mockFetch(() => reply(userList));
     try {
-      assert.deepEqual((await anilistUserList("adam")).map((e) => e.mediaId), [1, 2]);
+      assert.deepEqual(
+        (await anilistUserList("adam")).map((e) => e.mediaId),
+        [1, 2],
+      );
     } finally {
       m.restore();
     }
@@ -169,7 +183,11 @@ describe("AniList", () => {
     try {
       assert.deepEqual(await airedBetween([], 0, 1), []);
       assert.equal(m.calls.length, 0);
-      const out = await airedBetween(Array.from({ length: 60 }, (_, i) => i + 1), 0, 1000);
+      const out = await airedBetween(
+        Array.from({ length: 60 }, (_, i) => i + 1),
+        0,
+        1000,
+      );
       assert.equal(m.calls.length, 4); // 2 chunks x 2 pages
       assert.equal(out.length, 4);
     } finally {
@@ -198,7 +216,10 @@ describe("AniList", () => {
       const out = await popularIdsBatch(Array.from({ length: 10 }, () => ({ genre_in: ["Fantasy"] })));
       assert.equal(m.calls.length, 2);
       assert.equal(out.length, 10);
-      assert.deepEqual(out[0].map((x) => x.firstSeason), [false, true, true]);
+      assert.deepEqual(
+        out[0].map((x) => x.firstSeason),
+        [false, true, true],
+      );
       assert.equal(out[0][1].year, null);
       assert.deepEqual(out[1], []);
     } finally {

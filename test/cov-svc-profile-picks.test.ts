@@ -29,7 +29,11 @@ function seed() {
   addToSeason(w, prev.season, prev.year, [...loved, ...other]);
   w.anilistList = loved.map((m) => ({ mediaId: m.id, status: "COMPLETED", score: 90, progress: 12 }));
   const fresh = [
-    show(300, { title: { romaji: "Mahou no Tabi", english: "Magic Journey", native: "魔法の旅" }, season: cur.season, seasonYear: cur.year }),
+    show(300, {
+      title: { romaji: "Mahou no Tabi", english: "Magic Journey", native: "魔法の旅" },
+      season: cur.season,
+      seasonYear: cur.year,
+    }),
     show(301, { season: cur.season, seasonYear: cur.year }),
     show(302, { genres: ["Romance"], tags: tags("School", "Love Triangle"), season: cur.season, seasonYear: cur.year }),
     show(303, { season: cur.season, seasonYear: cur.year }),

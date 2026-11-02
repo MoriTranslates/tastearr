@@ -21,6 +21,11 @@ export const malPage1 = {
   paging: { next: "https://api.myanimelist.net/v2/users/adam/animelist?offset=1000" },
 };
 export const malPage2 = {
-  data: [{ node: { id: 5114, title: "Fullmetal Alchemist: Brotherhood" }, list_status: { status: "dropped", score: 0, num_episodes_watched: 2 } }],
+  data: [
+    {
+      node: { id: 5114, title: "Fullmetal Alchemist: Brotherhood" },
+      list_status: { status: "dropped", score: 0, num_episodes_watched: 2 },
+    },
+  ],
   paging: {},
 };

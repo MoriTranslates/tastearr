@@ -37,7 +37,20 @@ function rng(seed: number) {
 }
 
 const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Horror"];
-const TAGS = ["Isekai", "Magic", "Swordplay", "School", "Demons", "Time Loop", "Mecha", "Idol", "Cooking", "Reincarnation", "Villainess", "Military"];
+const TAGS = [
+  "Isekai",
+  "Magic",
+  "Swordplay",
+  "School",
+  "Demons",
+  "Time Loop",
+  "Mecha",
+  "Idol",
+  "Cooking",
+  "Reincarnation",
+  "Villainess",
+  "Military",
+];
 const FORMATS = ["TV", "TV_SHORT", "ONA", "MOVIE"];
 const STATUSES = ["NOT_YET_RELEASED", "RELEASING", "FINISHED"];
 
@@ -85,7 +98,11 @@ describe("taste scoring invariants", () => {
     for (let seed = 1; seed <= ROUNDS; seed++) {
       const r = rng(seed);
       const cands = Array.from({ length: r.int(0, 25) }, (_, i) => randomMedia(r, i + 1));
-      const ctx = emptyCtx({ fb: new Map(cands.filter(() => r.next() < 0.3).map((m) => [m.id, r.pick(["loved", "liked", "meh", "disliked", "hidden", "added"])])) });
+      const ctx = emptyCtx({
+        fb: new Map(
+          cands.filter(() => r.next() < 0.3).map((m) => [m.id, r.pick(["loved", "liked", "meh", "disliked", "hidden", "added"])]),
+        ),
+      });
       const picks = scoreCandidates(cands, randomProfile(r), ctx, env(cands));
       assert.equal(picks.length, cands.length, `seed ${seed}`);
       for (const p of picks) {
@@ -115,7 +132,12 @@ describe("taste scoring invariants", () => {
       const cands = Array.from({ length: 10 }, (_, i) => randomMedia(r, i + 1));
       const profile = randomProfile(r);
       const base = scoreCandidates(cands, profile, emptyCtx(), env(cands));
-      for (const [verdict, dir] of [["disliked", -1], ["hidden", -1], ["loved", 1], ["liked", 1]] as const) {
+      for (const [verdict, dir] of [
+        ["disliked", -1],
+        ["hidden", -1],
+        ["loved", 1],
+        ["liked", 1],
+      ] as const) {
         const fb = new Map(cands.map((m) => [m.id, verdict]));
         const after = scoreCandidates(cands, profile, emptyCtx({ fb }), env(cands));
         after.forEach((p, i) => {
@@ -137,12 +159,18 @@ describe("taste scoring invariants", () => {
       const cands = Array.from({ length: 8 }, (_, i) => randomMedia(r, i + 1));
       for (const v of ["disliked", "hidden"]) {
         const picks = scoreCandidates(cands, randomProfile(r), emptyCtx({ fb: new Map(cands.map((m) => [m.id, v])) }), env(cands));
-        assert.ok(picks.every((p) => p.excluded), `seed ${seed} ${v}`);
+        assert.ok(
+          picks.every((p) => p.excluded),
+          `seed ${seed} ${v}`,
+        );
       }
       const lists = new Map(cands.map((m) => [m.id, { id: m.id, source: "anilist", status: "COMPLETED", score: 90, progress: 12 }]));
       const finished = cands.map((m) => ({ ...m, status: "FINISHED", nextAiringEpisode: null }));
       const picks = scoreCandidates(finished, randomProfile(r), emptyCtx({ lists }), env(finished));
-      assert.ok(picks.every((p) => p.myStatus === "seen" && p.excluded), `seed ${seed} seen`);
+      assert.ok(
+        picks.every((p) => p.myStatus === "seen" && p.excluded),
+        `seed ${seed} seen`,
+      );
     }
   });
 
@@ -164,7 +192,12 @@ describe("taste scoring invariants", () => {
   test("an empty profile and an empty candidate list are fine", () => {
     assert.deepEqual(scoreCandidates([], randomProfile(rng(1)), emptyCtx(), env([])), []);
     const m = [randomMedia(rng(2), 1)];
-    const p = scoreCandidates(m, { builtAt: 0, trainedOn: 0, positives: 0, known: 0, base: 0, features: {}, favourites: [], sources: {} }, emptyCtx({ hasHistory: false }), env(m));
+    const p = scoreCandidates(
+      m,
+      { builtAt: 0, trainedOn: 0, positives: 0, known: 0, base: 0, features: {}, favourites: [], sources: {} },
+      emptyCtx({ hasHistory: false }),
+      env(m),
+    );
     assert.ok(p[0].match >= 0 && p[0].match <= 100);
   });
 
@@ -217,16 +250,23 @@ describe("mapping tables", () => {
     for (let seed = 1; seed <= ROUNDS; seed++) {
       const r = rng(seed);
       // Unique AniList ids per row: duplicates are the separate todo below.
-      const ids = r.some(Array.from({ length: 40 }, (_, i) => i + 1), r.int(0, 30));
+      const ids = r.some(
+        Array.from({ length: 40 }, (_, i) => i + 1),
+        r.int(0, 30),
+      );
       const rows: AnimeListRow[] = ids.map((id) => row(id, r.int(1, 15), r.pick([undefined, 1, 2, 3])));
-      const overrides = Array.from({ length: r.int(0, 10) }, () => ({ anilistId: r.int(1, 40), mapping: { tvdbId: r.int(1, 20), season: r.pick([null, 1, 2]) } }));
+      const overrides = Array.from({ length: r.int(0, 10) }, () => ({
+        anilistId: r.int(1, 40),
+        mapping: { tvdbId: r.int(1, 20), season: r.pick([null, 1, 2]) },
+      }));
       const t = buildTables(rows, overrides);
       for (const [a, m] of t.byAnilist) assert.ok(t.byTvdb.get(m.tvdbId)?.includes(a), `seed ${seed}: ${a} missing under tvdb ${m.tvdbId}`);
       for (const [tvdb, ids] of t.byTvdb) {
         assert.equal(new Set(ids).size, ids.length, `seed ${seed}: duplicate ids under ${tvdb}`);
         for (const a of ids) assert.equal(t.byAnilist.get(a)?.tvdbId, tvdb, `seed ${seed}: ${a} listed under ${tvdb} but mapped elsewhere`);
       }
-      for (const o of overrides.slice().reverse().slice(0, 1)) assert.deepEqual(t.byAnilist.get(o.anilistId), o.mapping, `seed ${seed}: last override wins`);
+      for (const o of overrides.slice().reverse().slice(0, 1))
+        assert.deepEqual(t.byAnilist.get(o.anilistId), o.mapping, `seed ${seed}: last override wins`);
     }
   });
 
@@ -281,7 +321,14 @@ describe("mapping tables", () => {
     assert.equal(isFirstOfMany([e(50, 2000)]), false);
     assert.equal(isFirstOfMany([e(12, 2018), e(12, 2020)]), false);
     assert.equal(isFirstOfMany([e(12, 2018), e(12, 2021)]), true);
-    assert.equal(isFirstOfMany([e(12, null), { episodes: 12, seasonYear: null, startDate: { year: 2010 } }, { episodes: 12, seasonYear: null, startDate: { year: 2014 } }]), true);
+    assert.equal(
+      isFirstOfMany([
+        e(12, null),
+        { episodes: 12, seasonYear: null, startDate: { year: 2010 } },
+        { episodes: 12, seasonYear: null, startDate: { year: 2014 } },
+      ]),
+      true,
+    );
   });
 });
 
@@ -327,8 +374,16 @@ describe("settings update", () => {
     assert.ok(!JSON.stringify(pub).includes(s.secret));
     assert.equal(applyUpdate(s, { sonarr: { apiKey: MASK } }).sonarr.apiKey, "real-key");
     assert.equal(applyUpdate(s, { sonarr: { apiKey: "••" } }).sonarr.apiKey, "real-key", "a mangled mask is also 'unchanged'");
-    assert.equal(applyUpdate(s, { sonarr: { url: "http://192.168.1.3:8989/", apiKey: MASK } }).sonarr.apiKey, "", "new address, old key dropped");
-    assert.equal(applyUpdate(s, { sonarr: { url: "http://192.168.1.2:8989///" } }).sonarr.apiKey, "real-key", "same address, trailing slashes ignored");
+    assert.equal(
+      applyUpdate(s, { sonarr: { url: "http://192.168.1.3:8989/", apiKey: MASK } }).sonarr.apiKey,
+      "",
+      "new address, old key dropped",
+    );
+    assert.equal(
+      applyUpdate(s, { sonarr: { url: "http://192.168.1.2:8989///" } }).sonarr.apiKey,
+      "real-key",
+      "same address, trailing slashes ignored",
+    );
   });
 });
 
@@ -356,7 +411,18 @@ describe("network helpers", () => {
   });
 
   test("private IPs, hosts and loopback", () => {
-    for (const ip of ["10.1.1.1", "172.16.0.1", "172.31.255.255", "192.168.0.1", "127.0.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1"]) assert.equal(isPrivateIp(ip), true, ip);
+    for (const ip of [
+      "10.1.1.1",
+      "172.16.0.1",
+      "172.31.255.255",
+      "192.168.0.1",
+      "127.0.0.1",
+      "::1",
+      "fd00::1",
+      "fe80::1",
+      "::ffff:10.0.0.1",
+    ])
+      assert.equal(isPrivateIp(ip), true, ip);
     for (const ip of ["172.32.0.1", "172.15.0.1", "8.8.8.8", "2001:db8::1", "192.169.0.1"]) assert.equal(isPrivateIp(ip), false, ip);
     for (const h of ["localhost", "sonarr", "tower.local", "192.168.1.5", "[::1]", "my-nas"]) assert.equal(isPrivateHost(h), true, h);
     for (const h of ["example.com", "8.8.8.8", "172.32.0.1", "a.b.c"]) assert.equal(isPrivateHost(h), false, h);
@@ -371,13 +437,17 @@ describe("small pure helpers", () => {
     let active = 0;
     let peak = 0;
     const done: number[] = [];
-    await eachLimit(Array.from({ length: 30 }, (_, i) => i), 4, async (i) => {
-      active++;
-      peak = Math.max(peak, active);
-      await new Promise((r) => setTimeout(r, 1));
-      done.push(i);
-      active--;
-    });
+    await eachLimit(
+      Array.from({ length: 30 }, (_, i) => i),
+      4,
+      async (i) => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 1));
+        done.push(i);
+        active--;
+      },
+    );
     assert.equal(done.length, 30);
     assert.ok(peak <= 4 && peak > 1, `peak ${peak}`);
     await eachLimit([], 4, async () => assert.fail("nothing to run"));
@@ -392,7 +462,7 @@ describe("small pure helpers", () => {
   test("episode alerts: code padding, duplicates removed, ordering, wording for 1, 2-4 and many episodes, CJK titles", () => {
     assert.equal(episodeCode({ seasonNumber: 1, episodeNumber: 5 }), "S01E05");
     assert.equal(episodeCode({ seasonNumber: 12, episodeNumber: 100 }), "S12E100");
-    const one = episodeAlert("葬送のフリーレン", [{ seasonNumber: 1, episodeNumber: 5, title: "Episode & \"5\"" }]);
+    const one = episodeAlert("葬送のフリーレン", [{ seasonNumber: 1, episodeNumber: 5, title: 'Episode & "5"' }]);
     assert.equal(one.title, "New episode: 葬送のフリーレン");
     assert.match(one.body, /S01E05 · Episode & "5" is ready/);
     const dup = episodeAlert("X", [
@@ -402,13 +472,21 @@ describe("small pure helpers", () => {
     ]);
     assert.equal(dup.title, "2 new episodes: X");
     assert.match(dup.body, /^S01E01, S01E02 are ready/);
-    const many = episodeAlert("X", Array.from({ length: 6 }, (_, i) => ({ seasonNumber: 1, episodeNumber: i + 1 })));
+    const many = episodeAlert(
+      "X",
+      Array.from({ length: 6 }, (_, i) => ({ seasonNumber: 1, episodeNumber: i + 1 })),
+    );
     assert.match(many.body, /^6 episodes \(S01E01–S01E06\)/);
   });
 
   test("parseId accepts positive integers only", () => {
     assert.equal(parseId("42"), 42);
-    for (const bad of ["0", "-1", "1.5", "abc", "", "1e3x", " "]) assert.throws(() => parseId(bad), (e) => e instanceof AppError && e.statusCode === 400, bad);
+    for (const bad of ["0", "-1", "1.5", "abc", "", "1e3x", " "])
+      assert.throws(
+        () => parseId(bad),
+        (e) => e instanceof AppError && e.statusCode === 400,
+        bad,
+      );
   });
 
   test("defaultMonitor / planSeriesAdd never turn on a whole back catalogue by accident", () => {
@@ -422,7 +500,10 @@ describe("small pure helpers", () => {
       ({ seasons: [0, 1, 2, 3].map((n) => ({ seasonNumber: n, monitored: true })) }) as unknown as LibrarySeries;
     const s = series();
     const plan = planSeriesAdd(s, 3, "season", true);
-    assert.deepEqual(s.seasons.filter((x) => x.monitored).map((x) => x.seasonNumber), [3]);
+    assert.deepEqual(
+      s.seasons.filter((x) => x.monitored).map((x) => x.seasonNumber),
+      [3],
+    );
     assert.equal(plan.listed, true);
     const unlisted = planSeriesAdd(series(), 9, "season", true);
     assert.equal(unlisted.listed, false);
@@ -430,7 +511,11 @@ describe("small pure helpers", () => {
     assert.equal(planSeriesAdd(series(), 1, "season", true).monitor, "future", "'season' without a real sequel season falls back");
     const all = series();
     planSeriesAdd(all, null, "all", false);
-    assert.deepEqual(all.seasons.filter((x) => x.monitored).map((x) => x.seasonNumber), [1, 2, 3], "specials (season 0) are never monitored by 'all'");
+    assert.deepEqual(
+      all.seasons.filter((x) => x.monitored).map((x) => x.seasonNumber),
+      [1, 2, 3],
+      "specials (season 0) are never monitored by 'all'",
+    );
     assert.equal(planSeriesAdd(series(), 2, "none", true).addOptions.searchForMissingEpisodes, false);
   });
 });
@@ -465,13 +550,20 @@ describe("selectAutoAdd", () => {
     assert.deepEqual(run([pick(1, { excluded: "x" }), pick(2, { lowConfidence: true })]), []);
     assert.deepEqual(run([pick(1, { verdict: "liked" })]), [1], "a thumbs-up is fine");
     for (const v of ["disliked", "hidden", "meh", "added", "loved"]) assert.deepEqual(run([pick(1, { verdict: v })]), [], v);
-    for (const st of ["seen", "watching", "dropped", "following", "planning"] as const) assert.deepEqual(run([pick(1, { myStatus: st })]), [], st);
+    for (const st of ["seen", "watching", "dropped", "following", "planning"] as const)
+      assert.deepEqual(run([pick(1, { myStatus: st })]), [], st);
     assert.deepEqual(run([pick(1)], { done: new Set([1]) }), [], "each show at most once");
   });
 
   test("guessed or unmatched shows are not added blindly; the library is monitored not re-added", () => {
     assert.deepEqual(run([pick(1, { needsMatch: true }), pick(2, { matchGuessed: true }), pick(3, { tvdbId: null })]), []);
-    const monitor = selectAutoAdd([pick(1, { inLibrary: true, seasonMonitored: false, tvdbSeason: 2 })], { cfg, done: new Set(), sonarrOn: true, radarrOn: true, room: 5 });
+    const monitor = selectAutoAdd([pick(1, { inLibrary: true, seasonMonitored: false, tvdbSeason: 2 })], {
+      cfg,
+      done: new Set(),
+      sonarrOn: true,
+      radarrOn: true,
+      room: 5,
+    });
     assert.equal(monitor[0].autoAction, "monitor");
     assert.deepEqual(run([pick(1, { inLibrary: true, seasonMonitored: true, tvdbSeason: 2 })]), []);
     assert.deepEqual(run([pick(1, { inLibrary: true, seasonMonitored: false, tvdbSeason: null })]), []);
@@ -492,4 +584,3 @@ describe("selectAutoAdd", () => {
     assert.deepEqual(run([pick(1, { section: "unknown" as never })]), []);
   });
 });
-

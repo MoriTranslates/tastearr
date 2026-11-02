@@ -12,13 +12,21 @@ import { getValue, setValue } from "../server/data/kv.js";
 import { addDropped, droppedSet, markSeasonAnnounced, removeDropped, seasonAnnounced } from "../server/data/library.js";
 import { listEntries, replaceListEntries } from "../server/data/lists.js";
 import { clearMappingOverrides, mappingOverrides, saveMappingOverride } from "../server/data/mapping.js";
-import { cachedMedia, cachedMediaMany, cachedSeason, replaceSeason, seasonFetchedAt, storeMedia, MEDIA_SCHEMA } from "../server/data/media.js";
+import {
+  cachedMedia,
+  cachedMediaMany,
+  cachedSeason,
+  replaceSeason,
+  seasonFetchedAt,
+  storeMedia,
+  MEDIA_SCHEMA,
+} from "../server/data/media.js";
 import { isRevoked, revoke } from "../server/data/sessions.js";
 import { media } from "./helpers.ts";
 
 describe("key-value", () => {
   test("round-trips text with CJK, quotes, newlines and a NUL-free large document; overwrite replaces", () => {
-    const doc = JSON.stringify({ t: "葬送のフリーレン \"quoted\" \n line", big: "x".repeat(500_000) });
+    const doc = JSON.stringify({ t: '葬送のフリーレン "quoted" \n line', big: "x".repeat(500_000) });
     setValue("doc", doc);
     assert.equal(getValue("doc"), doc);
     setValue("doc", "{}");
@@ -63,14 +71,22 @@ describe("media cache", () => {
   test("storing without a season keeps the season it already had", () => {
     storeMedia([media(20)], "WINTER", 2024);
     storeMedia([media(20)], null, null);
-    assert.deepEqual(cachedSeason("WINTER", 2024).map((x) => x?.id), [20]);
+    assert.deepEqual(
+      cachedSeason("WINTER", 2024).map((x) => x?.id),
+      [20],
+    );
   });
 
   test("replaceSeason: shows moved out of the season lose its tag; the season is marked fetched; an empty list keeps old rows", () => {
     replaceSeason([media(31), media(32)], "FALL", 2024);
     assert.ok(seasonFetchedAt("FALL", 2024)! > 0);
     replaceSeason([media(32), media(33)], "FALL", 2024);
-    assert.deepEqual(cachedSeason("FALL", 2024).map((x) => x!.id).sort(), [32, 33]);
+    assert.deepEqual(
+      cachedSeason("FALL", 2024)
+        .map((x) => x!.id)
+        .sort(),
+      [32, 33],
+    );
     assert.ok(cachedMedia(31), "the row itself is still cached for lookups by id");
     replaceSeason([], "FALL", 2024);
     assert.equal(cachedSeason("FALL", 2024).length, 2, "an empty reply from AniList must not wipe the cached season");
@@ -121,7 +137,12 @@ describe("transactions", () => {
         { id: 3, status: null as unknown as string, score: null, progress: null }, // NOT NULL violation
       ]),
     );
-    assert.deepEqual(listEntries().filter((e) => e.source === "anilist").map((e) => e.id), [1]);
+    assert.deepEqual(
+      listEntries()
+        .filter((e) => e.source === "anilist")
+        .map((e) => e.id),
+      [1],
+    );
   });
 });
 
@@ -133,15 +154,24 @@ describe("other repositories", () => {
     ]);
     replaceListEntries("anilist", []);
     const mal = listEntries().filter((e) => e.source === "mal");
-    assert.deepEqual(mal.map((e) => [e.id, e.status]), [[7, "COMPLETED"]]);
+    assert.deepEqual(
+      mal.map((e) => [e.id, e.status]),
+      [[7, "COMPLETED"]],
+    );
   });
 
   test("following: following twice is fine; episodes before the next one are pre-announced; unfollow keeps announced marks", () => {
     addFollow(50, "【推しの子】", 4);
     addFollow(50, "【推しの子】", 4);
-    assert.deepEqual(followedIds().filter((i) => i === 50), [50]);
+    assert.deepEqual(
+      followedIds().filter((i) => i === 50),
+      [50],
+    );
     const seen = announcedChecker();
-    assert.deepEqual([1, 2, 3, 4].map((e) => seen(50, e)), [true, true, true, false]);
+    assert.deepEqual(
+      [1, 2, 3, 4].map((e) => seen(50, e)),
+      [true, true, true, false],
+    );
     markAnnounced(50, 4);
     markAnnounced(50, 4);
     removeFollow(50);
@@ -155,7 +185,10 @@ describe("other repositories", () => {
     assert.equal(autoAddedInSeason("FALL", 2030), 1);
     assert.ok(autoAddedIds().has(60));
     const h = autoAddHistory() as { id: number; title: string; match: number }[];
-    assert.deepEqual(h.filter((x) => x.id === 60).map((x) => [x.title, x.match]), [['Re:ZERO "S3" 葬送', 90]]);
+    assert.deepEqual(
+      h.filter((x) => x.id === 60).map((x) => [x.title, x.match]),
+      [['Re:ZERO "S3" 葬送', 90]],
+    );
     assert.equal(autoAddedInSeason("WINTER", 2030), 0);
   });
 
@@ -172,7 +205,10 @@ describe("other repositories", () => {
     assert.equal(seasonAnnounced("SPRING", 2032), false);
     saveMappingOverride(5, 100, null);
     saveMappingOverride(5, 200, 2);
-    assert.deepEqual(mappingOverrides().map((o) => ({ ...o })), [{ anilist_id: 5, tvdb_id: 200, season: 2 }]);
+    assert.deepEqual(
+      mappingOverrides().map((o) => ({ ...o })),
+      [{ anilist_id: 5, tvdb_id: 200, season: 2 }],
+    );
     assert.equal(clearMappingOverrides(), 1);
     assert.equal(clearMappingOverrides(), 0);
     revoke("old", Date.now() - 1000);

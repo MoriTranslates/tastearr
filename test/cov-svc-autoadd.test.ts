@@ -22,7 +22,17 @@ const configure = (over: Record<string, unknown> = {}) =>
     lists: { anilistUser: "adam", malUser: "", malClientId: "" },
     training: { ...s.training, seasons: 1 },
     notify: { ...s.notify, ntfyUrl: NTFY },
-    autoAdd: { ...s.autoAdd, enabled: true, minMatch: 1, newShows: true, sequels: true, movies: false, maxPerSeason: 10, search: false, ...over },
+    autoAdd: {
+      ...s.autoAdd,
+      enabled: true,
+      minMatch: 1,
+      newShows: true,
+      sequels: true,
+      movies: false,
+      maxPerSeason: 10,
+      search: false,
+      ...over,
+    },
   }));
 
 beforeEach(() => {
@@ -31,7 +41,13 @@ beforeEach(() => {
   net = installWorld(w);
   const fresh = seedTaste(w, 3);
   writeAnimeList(fresh.map((m, i) => ({ anilist_id: m.id, tvdb_id: 5000 + i, season: { tvdb: 1 } })));
-  for (const m of fresh) w.sonarrLookup.set(5000 + (m.id - 300), { title: `Show ${m.id}`, tvdbId: 5000 + (m.id - 300), year: 2026, seasons: [{ seasonNumber: 1, monitored: false }] });
+  for (const m of fresh)
+    w.sonarrLookup.set(5000 + (m.id - 300), {
+      title: `Show ${m.id}`,
+      tvdbId: 5000 + (m.id - 300),
+      year: 2026,
+      seasons: [{ seasonNumber: 1, monitored: false }],
+    });
   configure();
   invalidateContext();
   forgetSeries();

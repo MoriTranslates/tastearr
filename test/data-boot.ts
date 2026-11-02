@@ -21,7 +21,11 @@ export function plantDatabase(fixtureSql: string | null, extraSql = "") {
 export function inspect(file: string) {
   const raw = new DatabaseSync(file, { readOnly: true });
   try {
-    const tables = (raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
+    const tables = (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as {
+        name: string;
+      }[]
+    ).map((r) => r.name);
     const version = (raw.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
     return { tables, version };
   } finally {

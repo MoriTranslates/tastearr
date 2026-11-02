@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p test/tsconfig.json",
     "eval": "node --no-warnings=ExperimentalWarning dist/server/eval.js",
     "test": "node scripts/test.mjs",
+    "test:coverage": "node scripts/test.mjs --coverage",
     "lint": "node tools/lint/node_modules/eslint/bin/eslint.js -c tools/lint/eslint.config.js --max-warnings 0 . && node tools/lint/node_modules/prettier/bin/prettier.cjs --check .",
     "format": "node tools/lint/node_modules/prettier/bin/prettier.cjs --write .",
     "depcheck": "node tools/lint/node_modules/dependency-cruiser/bin/dependency-cruiser.mjs --config tools/lint/dependency-cruiser.cjs server shared web/src test",
@@ -27,6 +28,10 @@
     "fastify": "^5.12.7"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^21.0.4",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

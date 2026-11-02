@@ -92,7 +92,10 @@ export function installWorld(w: World) {
     if (u.hostname === "api.myanimelist.net") {
       if (w.fail.mal) return json({}, w.fail.mal);
       return json({
-        data: w.malList.map((e) => ({ node: { id: e.id }, list_status: { status: e.status, score: e.score, num_episodes_watched: e.eps } })),
+        data: w.malList.map((e) => ({
+          node: { id: e.id },
+          list_status: { status: e.status, score: e.score, num_episodes_watched: e.eps },
+        })),
         paging: {},
       });
     }

@@ -12,14 +12,29 @@ let w: World;
 let net: ReturnType<typeof installWorld>;
 const now = () => Math.floor(Date.now() / 1000);
 const notify = (over: Record<string, unknown> = {}) =>
-  patchSettings((s) => ({ ...s, notify: { ...s.notify, ntfyUrl: NTFY, discordWebhook: "", gotifyUrl: "", gotifyToken: "", airingAlerts: true, airingDelayMin: 0, ...over } }));
+  patchSettings((s) => ({
+    ...s,
+    notify: {
+      ...s.notify,
+      ntfyUrl: NTFY,
+      discordWebhook: "",
+      gotifyUrl: "",
+      gotifyToken: "",
+      airingAlerts: true,
+      airingDelayMin: 0,
+      ...over,
+    },
+  }));
 
 beforeEach(async () => {
   resetUserData();
   w = newWorld();
   net = installWorld(w);
-  const a = show(1, { title: { romaji: "Frieren", english: "Frieren", native: "葬送のフリーレン" }, externalLinks: [{ site: "Crunchyroll", url: "https://cr.example/f", type: "STREAMING" }] as never });
-  const b = show(2, { title: { romaji: "Two", english: "Two & \"Quotes\"", native: null } });
+  const a = show(1, {
+    title: { romaji: "Frieren", english: "Frieren", native: "葬送のフリーレン" },
+    externalLinks: [{ site: "Crunchyroll", url: "https://cr.example/f", type: "STREAMING" }] as never,
+  });
+  const b = show(2, { title: { romaji: "Two", english: 'Two & "Quotes"', native: null } });
   addToSeason(w, "FALL", 2026, [a, b]);
   notify();
   for (const id of followedIds()) unfollow(id);
