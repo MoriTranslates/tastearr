@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link } from "../App";
-import { clearPicksCache } from "./Picks";
+import { Link } from "../router";
+import { clearPicksCache } from "../picks/Picks";
 import { api, type Followed, type Show, type Status } from "../api";
-import { airLabel, ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
+import { ErrorBox, Spinner, useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { airLabel } from "../lib/format";
 
 export function Shows({ status }: { status: Status }) {
   usePageTitle("My Shows");

@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Status } from "./api";
-import { Login } from "./pages/Login";
-import { Picks } from "./pages/Picks";
-import { Quiz } from "./pages/Quiz";
-import { Settings } from "./pages/Settings";
-import { Setup } from "./pages/Setup";
-import { Shows } from "./pages/Shows";
-import { System } from "./pages/System";
-import { Taste } from "./pages/Taste";
-import { Wizard } from "./pages/Wizard";
-import { ToastProvider } from "./ui";
+import { Login } from "./auth/Login";
+import { Picks } from "./picks/Picks";
+import { Quiz } from "./quiz/Quiz";
+import { Settings } from "./settings/Settings";
+import { Setup } from "./auth/Setup";
+import { Shows } from "./shows/Shows";
+import { System } from "./system/System";
+import { Taste } from "./taste/Taste";
+import { Wizard } from "./wizard/Wizard";
+import { Link } from "./router";
+import { ToastProvider } from "./components/ui";
 
 const NAV = [
   { path: "/", label: "Picks", icon: "★" },
@@ -17,29 +18,6 @@ const NAV = [
   { path: "/taste", label: "Taste", icon: "♥" },
   { path: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
-
-export function navigate(path: string) {
-  history.pushState(null, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
-
-export function Link({
-  to,
-  children,
-  className,
-  current,
-}: {
-  to: string;
-  children: React.ReactNode;
-  className?: string;
-  current?: boolean;
-}) {
-  return (
-    <a href={to} className={className} aria-current={current ? "page" : undefined} onClick={(e) => (e.preventDefault(), navigate(to))}>
-      {children}
-    </a>
-  );
-}
 
 export function App() {
   const [path, setPath] = useState(location.pathname);

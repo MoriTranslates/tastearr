@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type Pref } from "../api";
-import { navigate } from "../App";
-import { ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
+import { navigate } from "../router";
+import { ErrorBox, Spinner, useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 interface QuizShow {
   id: number;

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Job, type Status } from "../api";
-import { Link, navigate } from "../App";
-import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, unsaved, useSettings } from "../connections";
-import { usePageTitle } from "../ui";
+import { Link, navigate } from "../router";
+import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, unsaved, useSettings } from "../settings/connections";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 type Mode = "server" | "stream";
 const STEPS: Record<Mode, string[]> = {

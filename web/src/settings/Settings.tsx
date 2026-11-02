@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, store, type Settings as S, type Status } from "../api";
-import { Link } from "../App";
-import { AlertsCard, ArrCard, AutoDetect, ExtraSonarrCard, ListsCard, MediaCard, useSettings } from "../connections";
-import { ErrorBox, ListInput, NumberInput, relTime, SecretInput, usePageTitle, useToast } from "../ui";
+import { Link } from "../router";
+import { AlertsCard, ArrCard, AutoDetect, ExtraSonarrCard, ListsCard, MediaCard, useSettings } from "./connections";
+import { ErrorBox, ListInput, NumberInput, SecretInput, useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { relTime } from "../lib/format";
 
 const TABS = [
   { id: "connections", label: "Connections" },

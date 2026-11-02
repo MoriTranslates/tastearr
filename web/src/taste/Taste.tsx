@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, type Job, type Profile } from "../api";
-import { Link } from "../App";
-import { ErrorBox, relTime, Spinner, usePageTitle, useToast } from "../ui";
+import { Link } from "../router";
+import { ErrorBox, Spinner, useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { relTime } from "../lib/format";
 
 const SOURCES: Record<string, string> = {
   LIGHT_NOVEL: "Based on a light novel",

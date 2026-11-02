@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type Job } from "../api";
-import { relTime, usePageTitle, useToast } from "../ui";
+import { useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { relTime } from "../lib/format";
 
 const JOB_NAMES: Record<string, string> = { profile: "Build taste profile", refresh: "Refresh seasons & alerts" };
 

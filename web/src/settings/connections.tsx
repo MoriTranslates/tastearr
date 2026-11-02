@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type ArrOptions, type Settings } from "./api";
-import { Chips, NumberInput, Pill, SecretInput, useToast } from "./ui";
+import { api, type ArrOptions, type Settings } from "../api";
+import { Chips, NumberInput, Pill, SecretInput, useToast } from "../components/ui";
 
 type Save = (patch: Partial<Settings>) => Promise<Settings>;
 

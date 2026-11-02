@@ -11,7 +11,9 @@ import {
   type Section,
   type Status,
 } from "../api";
-import { airLabel, dateLabel, ErrorBox, Modal, Spinner, usePageTitle, useToast } from "../ui";
+import { ErrorBox, Modal, Spinner, useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { airLabel, dateLabel } from "../lib/format";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "continuing", label: "Continuing", hint: "New seasons of shows you know, and shows still airing" },
