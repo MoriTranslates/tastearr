@@ -17,6 +17,9 @@ export const allSeries = (conn: ArrConn) => call<SonarrSeries[]>(conn, "GET", "/
 export const getSeries = (conn: ArrConn, id: number) => call<SonarrSeries>(conn, "GET", `/series/${id}`);
 export const putSeries = (conn: ArrConn, id: number, series: unknown) => call(conn, "PUT", `/series/${id}`, series);
 export const addSeries = (conn: ArrConn, series: unknown) => call<SonarrSeries>(conn, "POST", "/series", series);
+/** The library's copy of a series, if it has one (filtered here too, in case the server ignores the query). */
+export const seriesByTvdb = async (conn: ArrConn, tvdbId: number) =>
+  (await call<SonarrSeries[]>(conn, "GET", `/series?tvdbId=${tvdbId}`)).find((x) => x.tvdbId === tvdbId) ?? null;
 
 /** Sonarr's series search: "tvdb:123" or a title. */
 export const lookup = (conn: ArrConn, term: string) => call<SonarrSeries[]>(conn, "GET", `/series/lookup?term=${term}`);

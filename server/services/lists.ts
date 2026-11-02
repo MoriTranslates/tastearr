@@ -1,5 +1,6 @@
 import { anilistUserList } from "../adapters/anilist.js";
 import { malUserList } from "../adapters/mal.js";
+import { fail } from "../core/errors.js";
 import { listEntries, replaceListEntries, type ListRow } from "../data/lists.js";
 import { mappingTables } from "./mapping.js";
 import { getSettings } from "./settings.js";
@@ -34,7 +35,7 @@ const MAL_STATUS: Record<string, string> = {
 };
 
 export async function importMal(user: string, clientId: string): Promise<ImportResult> {
-  if (!clientId) throw new Error("MyAnimeList needs a free API client ID (myanimelist.net/apiconfig)");
+  if (!clientId) throw fail("MyAnimeList needs a free API client ID (myanimelist.net/apiconfig)", 400);
   const { byMal } = await mappingTables();
   const rows: ListRow[] = [];
   for (const e of await malUserList(user, clientId)) {
@@ -46,11 +47,29 @@ export async function importMal(user: string, clientId: string): Promise<ImportR
   return { source: "mal", entries: rows.length };
 }
 
-/** Re-imports whichever lists are configured (called before profile rebuilds). */
+/**
+ * Re-imports each configured list on its own: one failing (MAL 401, AniList down) keeps its previously imported
+ * entries and doesn't stop the other. Returns what was imported and what failed.
+ */
+export async function refreshListsDetailed(lists = getSettings().lists) {
+  const { anilistUser, malUser, malClientId } = lists;
+  const imported: string[] = [];
+  const errors: string[] = [];
+  const one = async (name: string, run: () => Promise<ImportResult>) => {
+    try {
+      imported.push(`${(await run()).entries} ${name} entries`);
+    } catch (e) {
+      errors.push(`${name}: ${(e as Error).message}`);
+    }
+  };
+  if (anilistUser) await one("AniList", () => importAnilist(anilistUser));
+  if (malUser && malClientId) await one("MAL", () => importMal(malUser, malClientId));
+  return { imported, errors };
+}
+
+/** Re-imports whichever lists are configured; throws (after trying every list) when any of them failed. */
 export async function refreshLists() {
-  const { anilistUser, malUser, malClientId } = getSettings().lists;
-  const out: string[] = [];
-  if (anilistUser) out.push(`${(await importAnilist(anilistUser)).entries} AniList entries`);
-  if (malUser && malClientId) out.push(`${(await importMal(malUser, malClientId)).entries} MAL entries`);
-  return out;
+  const { imported, errors } = await refreshListsDetailed();
+  if (errors.length) throw new Error(`${errors.join("; ")}${imported.length ? ` (imported ${imported.join(", ")})` : ""}`);
+  return imported;
 }

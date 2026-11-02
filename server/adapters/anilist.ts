@@ -13,36 +13,80 @@ const FIELDS = `id title { romaji english native } format status source episodes
   nextAiringEpisode { airingAt episode } externalLinks { site url type } trailer { id site }`;
 
 const ENDPOINT = "https://graphql.anilist.co";
-let gapMs = 800; // adjusted from X-RateLimit-Limit (90/min normally, 30/min when AniList is degraded)
+
+/**
+ * Pacing and retries. `gapMs` is the starting gap between calls (adjusted from X-RateLimit-Limit: 90/min normally,
+ * 30/min when AniList is degraded). Network errors, timeouts and 5xx answers are retried with exponential backoff; a
+ * 429 waits as long as Retry-After / X-RateLimit-Reset say, up to `maxWaitMs`. Tests shrink these.
+ */
+export const ANILIST_LIMITS = { gapMs: 800, retries: 4, backoffMs: 2_000, maxWaitMs: 120_000 };
+let learnedGap: number | null = null;
 let last = 0;
 let chain: Promise<unknown> = Promise.resolve();
 
-/** Serialised, rate-limited AniList GraphQL call that honours the rate-limit headers and 429 Retry-After. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const gap = () => learnedGap ?? ANILIST_LIMITS.gapMs;
+
+/** How long a 429 asks to wait: Retry-After (seconds or a date), else X-RateLimit-Reset (unix seconds), else null. */
+export function rateLimitWaitMs(h: Headers, now = Date.now()): number | null {
+  const ra = h.get("retry-after");
+  if (ra) {
+    const s = Number(ra);
+    if (Number.isFinite(s) && s >= 0) return s * 1000;
+    const at = Date.parse(ra);
+    if (!Number.isNaN(at)) return Math.max(0, at - now);
+  }
+  const reset = Number(h.get("x-ratelimit-reset"));
+  return reset > 0 ? Math.max(0, reset * 1000 - now) : null;
+}
+
+/** Serialised, rate-limited AniList GraphQL call that honours the rate-limit headers and retries transient failures. */
 function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const run = async (): Promise<T> => {
+    const { retries, backoffMs, maxWaitMs } = ANILIST_LIMITS;
+    const backoff = (attempt: number) => Math.min(maxWaitMs, backoffMs * 2 ** attempt);
     for (let attempt = 0; ; attempt++) {
-      const wait = last + gapMs - Date.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      const wait = last + gap() - Date.now();
+      if (wait > 0) await sleep(wait);
       last = Date.now();
-      const res = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "User-Agent": "Tastearr (+https://github.com/MoriTranslates/tastearr)",
-        },
-        body: JSON.stringify({ query, variables }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      const limit = Number(res.headers.get("x-ratelimit-limit"));
-      if (limit > 0) gapMs = Math.ceil(60_000 / limit) + 100;
-      if (Number(res.headers.get("x-ratelimit-remaining")) === 0) last = Date.now() + 60_000 - gapMs;
-      if (res.status === 429 && attempt < 5) {
-        const s = Number(res.headers.get("retry-after")) || 60;
-        await new Promise((r) => setTimeout(r, s * 1000));
-        continue;
+      let res: Response;
+      try {
+        res = await fetch(ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "User-Agent": "Tastearr (+https://github.com/MoriTranslates/tastearr)",
+          },
+          body: JSON.stringify({ query, variables }),
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (e) {
+        if (attempt < retries) {
+          await sleep(backoff(attempt));
+          continue;
+        }
+        throw new Error(`Can't reach AniList (${(e as Error).message}). Try again in a few minutes.`, { cause: e });
       }
-      if (res.status >= 500) throw new Error(`AniList is having trouble right now (HTTP ${res.status}). Try again in a few minutes.`);
+      const limit = Number(res.headers.get("x-ratelimit-limit"));
+      if (limit > 0) learnedGap = Math.ceil(60_000 / limit) + 100;
+      if (res.headers.get("x-ratelimit-remaining") === "0") last = Date.now() + (rateLimitWaitMs(res.headers) ?? 60_000) - gap();
+      if (res.status === 429) {
+        const ms = rateLimitWaitMs(res.headers) ?? 60_000;
+        if (attempt < retries && ms <= maxWaitMs) {
+          await sleep(ms);
+          last = Date.now();
+          continue;
+        }
+        throw new Error(`AniList's rate limit was hit; try again in ${Math.ceil(ms / 1000)} seconds.`);
+      }
+      if (res.status >= 500) {
+        if (attempt < retries) {
+          await sleep(backoff(attempt));
+          continue;
+        }
+        throw new Error(`AniList is having trouble right now (HTTP ${res.status}). Try again in a few minutes.`);
+      }
       if (!res.ok)
         throw new Error(
           `AniList refused the request (HTTP ${res.status}): ${(await res.text())
@@ -50,8 +94,14 @@ function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
             .trim()
             .slice(0, 160)}`,
         );
-      const body = (await res.json()) as { data: T; errors?: { message: string }[] };
+      let body: { data: T | null; errors?: { message: string }[] };
+      try {
+        body = (await res.json()) as typeof body;
+      } catch (e) {
+        throw new Error("AniList sent an answer that isn't valid JSON. Try again in a few minutes.", { cause: e });
+      }
       if (body.errors?.length) throw new Error(`AniList: ${body.errors[0].message}`);
+      if (!body.data) throw new Error("AniList sent an empty answer. Try again in a few minutes.");
       return body.data;
     }
   };
@@ -153,11 +203,13 @@ export interface AniListEntry {
 
 /** A user's public AniList anime list. */
 export async function anilistUserList(userName: string): Promise<AniListEntry[]> {
-  const d = await gql<{ MediaListCollection: { lists: { entries: AniListEntry[] }[] } }>(
+  const d = await gql<{ MediaListCollection: { lists: { entries: AniListEntry[] | null }[] | null } | null }>(
     `query ($u: String) { MediaListCollection(userName: $u, type: ANIME) { lists { entries { mediaId status score(format: POINT_100) progress } } } }`,
     { u: userName },
   );
-  return d.MediaListCollection.lists.flatMap((l) => l.entries);
+  // A missing collection must fail the import rather than look like an empty list (which would wipe the stored one).
+  if (!d.MediaListCollection?.lists) throw new Error(`AniList user "${userName}" not found or their list is private`);
+  return d.MediaListCollection.lists.flatMap((l) => l.entries ?? []).filter((e) => Number.isInteger(e?.mediaId));
 }
 
 /** Episodes of the given shows that aired in a time window (unix seconds). */

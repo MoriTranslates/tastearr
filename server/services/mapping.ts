@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { animeListAge, downloadAnimeList, readAnimeList } from "../adapters/animelists.js";
 import { CONFIG_DIR } from "../config.js";
-import { buildTables, isFirstOfMany, place, type MappingTables } from "../core/mapping.js";
+import type { ShowIdTables } from "../adapters/showids.js";
+import { buildTables, isFirstOfMany, place, type AnimeListRow, type MappingTables } from "../core/mapping.js";
 import type { Mapping } from "../core/taste/types.js";
 import { clearMappingOverrides, mappingOverrides, saveMappingOverride } from "../data/mapping.js";
 import { getMediaByIds } from "./catalog.js";
@@ -16,7 +17,22 @@ const FILE = path.join(CONFIG_DIR, "anime-list-full.json");
 const MAX_AGE = 7 * 86_400_000;
 
 let tables: MappingTables | null = null;
+let showIds: ShowIdTables = { anidb: new Map(), tmdb: new Map(), imdb: new Map(), anilist: new Map() };
 let loadedAt = 0;
+
+/** TMDB / IMDb / AniDB / AniList -> TVDB, for media-server shows matched by an agent that gives no TVDB id. */
+function buildShowIds(rows: AnimeListRow[]): ShowIdTables {
+  const t: ShowIdTables = { anidb: new Map(), tmdb: new Map(), imdb: new Map(), anilist: new Map() };
+  for (const r of rows) {
+    if (!r.tvdb_id) continue;
+    const imdb = Array.isArray(r.imdb_id) ? r.imdb_id[0] : r.imdb_id;
+    if (r.anidb_id && !t.anidb.has(r.anidb_id)) t.anidb.set(r.anidb_id, r.tvdb_id);
+    if (r.themoviedb_id?.tv && !t.tmdb.has(r.themoviedb_id.tv)) t.tmdb.set(r.themoviedb_id.tv, r.tvdb_id);
+    if (imdb && !t.imdb.has(imdb)) t.imdb.set(imdb, r.tvdb_id);
+    if (r.anilist_id) t.anilist.set(r.anilist_id, r.tvdb_id);
+  }
+  return t;
+}
 
 async function refresh() {
   const stale = !fs.existsSync(FILE) || Date.now() - fs.statSync(FILE).mtimeMs > MAX_AGE;
@@ -29,7 +45,17 @@ async function refresh() {
     }
   }
   const overrides = mappingOverrides().map((o) => ({ anilistId: o.anilist_id, mapping: { tvdbId: o.tvdb_id, season: o.season } }));
-  tables = buildTables(readAnimeList(FILE), overrides);
+  let rows: AnimeListRow[];
+  try {
+    rows = readAnimeList(FILE);
+  } catch (e) {
+    // A damaged local copy (disk full, a hand edit): fetch a fresh one rather than failing every lookup for a week.
+    if (stale) throw new Error(`The anime mapping list is unreadable: ${(e as Error).message}`, { cause: e });
+    await downloadAnimeList(FILE);
+    rows = readAnimeList(FILE);
+  }
+  tables = buildTables(rows, overrides);
+  showIds = buildShowIds(rows);
   loadedAt = Date.now();
 }
 
@@ -85,6 +111,11 @@ export async function anilistIdsForTvdb(tvdbId: number): Promise<number[]> {
 
 export async function mappingTables(): Promise<MappingTables> {
   return ensure();
+}
+
+export async function showIdTables(): Promise<ShowIdTables> {
+  await ensure();
+  return showIds;
 }
 
 /** Long-runners that TVDB files as one big "season 1" (several AniList entries map there): never grab it all. */

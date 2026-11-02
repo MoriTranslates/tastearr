@@ -3,7 +3,7 @@ import { plexCheckPin, plexCreatePin, plexInfo, plexLibraries, plexServers, plex
 import { fail } from "../core/errors.js";
 import type { Settings } from "../core/settings.js";
 import type { WatchState } from "../core/taste/types.js";
-import { mappingTables } from "./mapping.js";
+import { showIdTables } from "./mapping.js";
 import { getSettings, patchSettings } from "./settings.js";
 
 /** The configured media server (Plex or Jellyfin): watch progress for the taste model, and connecting one. */
@@ -27,7 +27,7 @@ export const listJellyfinUsers = (conn: MediaConn) => jellyfinUsers(conn);
 export async function testMediaServer(conn: MediaConn) {
   if (conn.type === "plex") return plexInfo(conn);
   if (conn.type === "jellyfin") return jellyfinInfo(conn);
-  throw new Error("No media server selected");
+  throw fail("No media server selected", 400);
 }
 
 /** How far the user got through each show, by TVDB id. Empty when no media server is set up. */
@@ -35,8 +35,8 @@ export async function watchStates(): Promise<Map<number, WatchState>> {
   const conn = getSettings().media;
   if (conn.type === "none" || !conn.url || !conn.token) return new Map();
   const libs = conn.libraryIds.length ? conn.libraryIds : (await listLibraries(conn)).map((l) => l.id);
-  if (conn.type === "plex") return plexWatchStates(conn, libs, (await mappingTables()).tvdbByAnidb);
-  if (conn.type === "jellyfin") return jellyfinWatchStates(conn, libs);
+  if (conn.type === "plex") return plexWatchStates(conn, libs, await showIdTables());
+  if (conn.type === "jellyfin") return jellyfinWatchStates(conn, libs, await showIdTables());
   return new Map();
 }
 
