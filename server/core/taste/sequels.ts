@@ -60,7 +60,7 @@ export function inferMapping(m: Media, immediate: Media | null, ctx: Ctx): Mappi
   const year = m.startDate?.year ?? m.seasonYear ?? null;
   for (const series of ctx.lib.values()) {
     if (!names.has(norm(series.title)) || ctx.byTvdb.has(series.tvdbId) || series.seriesType !== "anime") continue;
-    const sy = (series.year as number | undefined) ?? null;
+    const sy = series.year ?? null;
     if (year && sy && Math.abs(year - sy) > 1) continue;
     const real = series.seasons.filter((x) => x.seasonNumber > 0).length;
     return { tvdbId: series.tvdbId, season: real === 1 ? 1 : null };

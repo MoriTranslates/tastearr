@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useToast } from "../components/ui";
+import { errorMessage } from "../lib/errors";
 
 interface Found {
   id: string;
@@ -24,7 +25,7 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
       setRes(r);
       setUrls(Object.fromEntries(r.found.map((f) => [f.id, f.url ?? ""])));
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
@@ -36,7 +37,7 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
       toast(`Using ${f.folder} for ${f.app === "sonarr" ? "Sonarr" : "Radarr"}`);
       onUsed();
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
 

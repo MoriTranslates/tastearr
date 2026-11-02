@@ -61,3 +61,8 @@ test("userFacing turns a plain Error into a status error and leaves status error
   assert.equal(await userFacing(() => 5), 5);
   assert.equal(new OutboundError("x").statusCode, 400);
 });
+
+test("a season that doesn't exist is a 400, and the season name is matched case-insensitively", async () => {
+  assert.equal((await call("GET", "/api/picks?season=NOPE&year=2030")).statusCode, 400);
+  assert.equal((await call("GET", "/api/picks?season=winter&year=1800")).statusCode, 400);
+});

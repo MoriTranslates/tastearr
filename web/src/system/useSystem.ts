@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Job } from "../api";
 import { useToast } from "../components/ui";
+import { errorMessage } from "../lib/errors";
 
 /** Version, uptime and background jobs, refreshed every few seconds. */
 export function useSystemInfo() {
@@ -12,7 +13,7 @@ export function useSystemInfo() {
     const load = () =>
       api<{ version: string; uptime: number; node: string; jobs: Job[] }>("/system")
         .then((x) => alive && setInfo(x))
-        .catch((e) => toast(e.message, true));
+        .catch((e) => toast(errorMessage(e), true));
     load();
     const t = setInterval(load, 3000);
     return () => {
@@ -31,7 +32,7 @@ export function useHealth() {
     setHealth(null);
     api<NonNullable<typeof health>>("/system/health")
       .then(setHealth)
-      .catch((e) => toast(e.message, true));
+      .catch((e) => toast(errorMessage(e), true));
   };
   useEffect(checkHealth, [toast]);
   return { health, checkHealth };

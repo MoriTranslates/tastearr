@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { errorMessage } from "../lib/errors";
 
 /** First run: create the account (like Sonarr/Radarr's "Authentication Required" screen, in plain words). */
 export function Setup({ onDone }: { onDone: () => void }) {
@@ -24,7 +25,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
       onDone();
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) setNeedCode(true);
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

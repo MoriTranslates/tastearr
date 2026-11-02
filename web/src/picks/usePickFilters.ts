@@ -11,8 +11,14 @@ export function usePickFilters(status: Status, initDay: number | null) {
   const [services, setServicesRaw] = useState<string[]>(() => store.get<string[] | null>("services", null) ?? status.prefs?.services ?? []);
   const [showLibrary, setShowLibraryRaw] = useState(() => store.get<boolean | null>("showLibrary", null) ?? !hideInLibrary);
   const [showFiltered, setShowFiltered] = useState(false);
-  const setServices = (v: string[]) => (setServicesRaw(v), store.set("services", v));
-  const setShowLibrary = (v: boolean) => (setShowLibraryRaw(v), store.set("showLibrary", v));
+  const setServices = (v: string[]) => {
+    setServicesRaw(v);
+    store.set("services", v);
+  };
+  const setShowLibrary = (v: boolean) => {
+    setShowLibraryRaw(v);
+    store.set("showLibrary", v);
+  };
   useEffect(() => store.set("sort", sort), [sort]);
   const clearFilters = () => {
     setDay(null);

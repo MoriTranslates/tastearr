@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, type Settings } from "../api";
 import { SecretInput, useToast } from "../components/ui";
+import { errorMessage } from "../lib/errors";
 
 /** More Sonarr instances (a separate anime or 4K Sonarr): used for "In library" and monitoring. Adds go to the main one. */
 export function ExtraSonarrCard({ s, onChange }: { s: Settings; onChange: () => void }) {
@@ -18,14 +19,14 @@ export function ExtraSonarrCard({ s, onChange }: { s: Settings; onChange: () => 
       setOpen(false);
       onChange();
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
   }
   async function remove(i: number) {
     if (!confirm(`Remove ${s.sonarrExtra[i]?.name}? Shows there will no longer count as "You have this".`)) return;
-    await api(`/sonarr/extra/${i}`, { method: "DELETE" }).catch((e) => toast((e as Error).message, true));
+    await api(`/sonarr/extra/${i}`, { method: "DELETE" }).catch((e) => toast(errorMessage(e), true));
     onChange();
   }
   return (

@@ -1,6 +1,8 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { errorMessage } from "../web/src/lib/errors.ts";
+import { trapTarget } from "../web/src/lib/focus.ts";
 import { pollUntil } from "../web/src/lib/poll.ts";
 import { currentSeason, readPicksQuery } from "../web/src/picks/query.ts";
 
@@ -91,4 +93,21 @@ test("readPicksQuery reads view and day, falling back to the stored view", () =>
   assert.equal(readPicksQuery("?day=", {}, "schedule").view, "schedule");
   assert.equal(readPicksQuery("?day=", {}, "schedule").day, null);
   assert.equal(readPicksQuery("?view=bogus", {}, "grid").view, "grid");
+});
+
+test("trapTarget keeps Tab inside a dialog, including one with a single control", () => {
+  const [a, b, c] = ["a", "b", "c"];
+  assert.equal(trapTarget([a, b, c], c, false), a, "Tab on the last wraps to the first");
+  assert.equal(trapTarget([a, b, c], a, true), c, "Shift+Tab on the first wraps to the last");
+  assert.equal(trapTarget([a, b, c], b, false), null, "in the middle the browser decides");
+  assert.equal(trapTarget([a, b, c], "outside", false), a, "lost focus comes back in");
+  assert.equal(trapTarget([a], a, false), a, "one control: Tab stays on it");
+  assert.equal(trapTarget([a], a, true), a, "one control: Shift+Tab stays on it");
+  assert.equal(trapTarget([], "x", false), null, "nothing to focus: leave it alone");
+});
+
+test("errorMessage reads Errors and tolerates anything else", () => {
+  assert.equal(errorMessage(new Error("bad")), "bad");
+  assert.equal(errorMessage("text"), "text");
+  assert.equal(errorMessage(undefined), "undefined");
 });

@@ -3,6 +3,7 @@ import { api, type Pick } from "../api";
 import { airLabel, dateLabel } from "../lib/format";
 import { STATUS_BADGE, matchText, storyLine } from "./helpers";
 import type { CardProps } from "./types";
+import { errorMessage } from "../lib/errors";
 
 export function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps & { p: Pick; compact?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -24,7 +25,7 @@ export function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps 
           : `Stopped following ${p.title}`,
       );
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
@@ -49,13 +50,13 @@ export function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps 
           label: "Undo",
           run: () => {
             patch(p.id, prev);
-            void api("/feedback", { body: { id: p.id, verdict: prev.verdict } }).catch((e) => toast((e as Error).message, true));
+            void api("/feedback", { body: { id: p.id, verdict: prev.verdict } }).catch((e) => toast(errorMessage(e), true));
           },
         });
       }
     } catch (e) {
       patch(p.id, prev);
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
 
@@ -126,8 +127,15 @@ export function PickCard({ p, patch, toast, status, onAdd, compact }: CardProps 
       className={`pick card${p.excluded ? " dim" : ""}${compact ? " compact" : ""}`}
       style={{ "--cover": p.color ?? "#7c3aed" } as React.CSSProperties}
     >
-      <a className="cover" href={p.siteUrl} target="_blank" rel="noreferrer" title="Open on AniList (new tab)">
-        {p.cover ? <img src={p.cover} alt={p.title} loading="lazy" /> : <div className="noimg" />}
+      <a
+        className="cover"
+        href={p.siteUrl}
+        target="_blank"
+        rel="noreferrer"
+        title="Open on AniList (new tab)"
+        aria-label={`${p.title} on AniList (opens in a new tab)`}
+      >
+        {p.cover ? <img src={p.cover} alt="" loading="lazy" /> : <div className="noimg" />}
         {p.carryOver && <span className="tag">Still airing</span>}
       </a>
       <div className="body">

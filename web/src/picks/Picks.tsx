@@ -25,7 +25,10 @@ export function Picks({ status }: { status: Status }) {
   const [collapsed, setCollapsedRaw] = useState<Section[]>(
     () => store.get<Section[] | null>("collapsed", null) ?? (hideShorts ? ["shorts"] : []),
   );
-  const setCollapsed = (v: Section[]) => (setCollapsedRaw(v), store.set("collapsed", v));
+  const setCollapsed = (v: Section[]) => {
+    setCollapsedRaw(v);
+    store.set("collapsed", v);
+  };
   const [lowOpen, setLowOpen] = useState<Section[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(() => !isMobile());
   const { key, picks, error, rebuilding, patch, retry, refreshFromAniList } = usePicks(sel, !!status.building);

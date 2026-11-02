@@ -3,6 +3,7 @@ import { ErrorBox, Spinner, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { relTime } from "../lib/format";
 import { useTasteProfile } from "./useTasteProfile";
+import { errorMessage } from "../lib/errors";
 
 const SOURCES: Record<string, string> = {
   LIGHT_NOVEL: "Based on a light novel",
@@ -100,7 +101,7 @@ export function Taste() {
       await startRebuild();
       toast("Rebuilding… this page updates when it's done");
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
 

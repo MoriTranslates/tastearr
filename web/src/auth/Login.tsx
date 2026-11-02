@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { errorMessage } from "../lib/errors";
 
 export function Login({ onDone }: { onDone: () => void }) {
   usePageTitle("Log in");
@@ -17,7 +18,7 @@ export function Login({ onDone }: { onDone: () => void }) {
       await api("/auth/login", { body: { username, password } });
       onDone();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

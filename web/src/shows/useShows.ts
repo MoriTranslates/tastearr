@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Followed, type Show } from "../api";
+import { errorMessage } from "../lib/errors";
 
 export type ShowsData = { sonarr: Show[]; following: Followed[] };
 
@@ -12,7 +13,7 @@ export function useShows() {
     setError(null);
     api<ShowsData>("/shows")
       .then(setData)
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(errorMessage(e)));
   }, [reload]);
 
   return { data, setData, error, retry: () => setReload((x) => x + 1) };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Job, type Profile } from "../api";
 import { pollUntil } from "../lib/poll";
+import { errorMessage } from "../lib/errors";
 
 const profileJob = (jobs: Job[]) => jobs.find((x) => x.name === "profile") ?? null;
 
@@ -23,7 +24,7 @@ export function useTasteProfile(onRebuildError: (message: string) => void) {
         if (!prof.building) setP(prof);
         if (prof.building || j?.state === "running") timer = setTimeout(load, 2000);
       } catch (e) {
-        if (alive) setError((e as Error).message);
+        if (alive) setError(errorMessage(e));
       }
     };
     void load();
@@ -44,9 +45,9 @@ export function useTasteProfile(onRebuildError: (message: string) => void) {
       keepGoing: (j) => j?.state === "running",
       onResult: (j) => {
         setJob(j);
-        if (j?.state !== "running") void api<Profile>("/profile").then(setP, (e) => onRebuildError((e as Error).message));
+        if (j?.state !== "running") void api<Profile>("/profile").then(setP, (e) => onRebuildError(errorMessage(e)));
       },
-      onError: (e) => onRebuildError((e as Error).message),
+      onError: (e) => onRebuildError(errorMessage(e)),
       delayMs: 2000,
       firstDelayMs: 1500,
     });

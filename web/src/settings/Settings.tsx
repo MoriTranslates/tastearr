@@ -13,6 +13,7 @@ import { Security } from "./Security";
 import { useSettings } from "./useSettings";
 import { ErrorBox, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { errorMessage } from "../lib/errors";
 
 const TABS = [
   { id: "connections", label: "Connections" },
@@ -29,7 +30,10 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
   const [tab, setTabRaw] = useState<Tab>(
     () => store.get<Tab | null>("settingsTab", null) ?? (status.mode === "stream" ? "picks" : "connections"),
   );
-  const setTab = (t: Tab) => (setTabRaw(t), store.set("settingsTab", t));
+  const setTab = (t: Tab) => {
+    setTabRaw(t);
+    store.set("settingsTab", t);
+  };
 
   // Decided once per visit, so saving Sonarr inside the folded section doesn't reshuffle the page.
   const [streamLayout] = useState(status.mode === "stream" && !status.sonarr && !status.radarr && !status.media);
@@ -87,7 +91,7 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
 
 function ServerCards({ s, reload, save }: { s: S; reload: () => Promise<S>; save: (p: Partial<S>) => Promise<S> }) {
   const toast = useToast();
-  const refresh = () => reload().catch((e) => toast((e as Error).message, true));
+  const refresh = () => reload().catch((e) => toast(errorMessage(e), true));
   // Cards remount after "Find my apps" fills in an address, so they show (and keep) what was detected.
   const [gen, setGen] = useState(0);
   return (

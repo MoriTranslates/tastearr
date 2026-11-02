@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Pick, type Status } from "../api";
 import { SORTS, weekday, type SortKey } from "./helpers";
 import { cache, heroes } from "./picksCache";
+import { errorMessage } from "../lib/errors";
 
 /** Fetches the picks for one season (cached per season) and keeps them fresh while the taste profile rebuilds. */
 export function usePicks(sel: { season: string; year: number }, building: boolean) {
@@ -25,7 +26,7 @@ export function usePicks(sel: { season: string; year: number }, building: boolea
       .catch((e) => {
         if (ctrl.signal.aborted) return;
         setRefresh(false);
-        if (!cached) setError((e as Error).message);
+        if (!cached) setError(errorMessage(e));
       });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -6,6 +6,7 @@ import { ErrorBox, Spinner, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useShows } from "./useShows";
 import { airLabel } from "../lib/format";
+import { errorMessage } from "../lib/errors";
 
 export function Shows({ status }: { status: Status }) {
   usePageTitle("My Shows");
@@ -35,7 +36,7 @@ export function Shows({ status }: { status: Status }) {
       );
       toast(r.dropped ? `Dropped ${s.title}. No more alerts for it.` : `${s.title} is back on`);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(null);
     }
@@ -51,10 +52,10 @@ export function Shows({ status }: { status: Status }) {
         run: () =>
           void api(`/picks/${f.id}/follow`, { body: {} })
             .then(() => setData((d) => d && { ...d, following: [f, ...d.following] }))
-            .catch((e) => toast((e as Error).message, true)),
+            .catch((e) => toast(errorMessage(e), true)),
       });
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
 

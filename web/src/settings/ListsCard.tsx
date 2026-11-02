@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Settings } from "../api";
 import { Pill, SecretInput, useToast } from "../components/ui";
 import type { Save } from "./useSettings";
+import { errorMessage } from "../lib/errors";
 
 export function ListsCard({ s, save, onSaved }: { s: Settings; save: Save; onSaved?: () => void }) {
   const toast = useToast();
@@ -15,7 +16,7 @@ export function ListsCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       toast(r.imported.length ? `Imported ${r.imported.join(" and ")}. Rebuilding your taste…` : "Saved");
       onSaved?.();
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }

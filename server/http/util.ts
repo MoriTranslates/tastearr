@@ -2,7 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { fail, parseId } from "../core/errors.js";
 import { checkOutbound } from "../core/outbound.js";
 import { isMasked } from "../core/settings.js";
-import { SEASONS, seasonOf, type Season } from "../core/taste/media.js";
+import { SEASONS, seasonOf } from "../core/taste/media.js";
 import { makeSession, SESSION_TTL_MS } from "../services/sessions.js";
 import { COOKIE } from "./auth.js";
 
@@ -12,9 +12,10 @@ export { fail };
 
 export const parseSeason = (q: Record<string, string | undefined>) => {
   const cur = seasonOf();
-  const season = (q.season?.toUpperCase() as Season | undefined) ?? cur.season;
+  const wanted = q.season?.toUpperCase();
+  const season = wanted === undefined ? cur.season : SEASONS.find((x) => x === wanted);
   const year = Number(q.year) || cur.year;
-  if (!SEASONS.includes(season) || year < 1960 || year > 2100) throw fail("Bad season");
+  if (!season || year < 1960 || year > 2100) throw fail("Bad season");
   return { season, year };
 };
 

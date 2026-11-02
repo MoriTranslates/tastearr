@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Settings } from "../api";
 import { useToast } from "../components/ui";
+import { errorMessage } from "../lib/errors";
 
 export type Save = (patch: Partial<Settings>) => Promise<Settings>;
 
@@ -11,7 +12,7 @@ export function useSettings() {
   useEffect(() => {
     api<Settings>("/settings")
       .then(setS)
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(errorMessage(e)));
   }, []);
   const save: Save = async (patch) => {
     const next = await api<Settings>("/settings", { method: "PUT", body: patch });

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Settings as S } from "../api";
 import { NumberInput, useToast } from "../components/ui";
 import { relTime } from "../lib/format";
+import { errorMessage } from "../lib/errors";
 
 interface AutoPick {
   id: number;
@@ -41,7 +42,7 @@ export function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promis
       toast(a.enabled ? "Saved. Auto-add runs with the next refresh (every 6 hours), or press Run now." : "Saved");
       setPreview(null);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
@@ -52,7 +53,7 @@ export function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promis
       await save({ autoAdd: a });
       setPreview((await api<{ picks: AutoPick[] }>("/autoadd/preview")).picks);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
@@ -66,7 +67,7 @@ export function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promis
       setPreview(null);
       setHistory(await api<AutoDone[]>("/autoadd/history"));
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
