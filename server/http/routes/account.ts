@@ -1,9 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { Status } from "../../../shared/api.js";
 import { VERSION } from "../../config.js";
-import { isPrivateIp } from "../../core/network.js";
 import { safeEqual } from "../../core/secrets.js";
-import { noteProxy, signedInStatus } from "../../services/health.js";
+import { signedInStatus } from "../../services/health.js";
 import { revokeSession } from "../../services/sessions.js";
 import { getSettings, patchSettings, setAccount, setBypassLocal } from "../../services/settings.js";
 import {
@@ -16,7 +15,6 @@ import {
   isLocalRequest,
   loginAllowed,
   loginSucceeded,
-  PROXY_TRUSTED,
   SETUP_TOKEN,
 } from "../auth.js";
 import { fail, sessionCookie } from "../util.js";
@@ -65,16 +63,15 @@ export function accountRoutes(app: FastifyInstance) {
     { config: { setup: true }, bodyLimit: AUTH_BODY_LIMIT },
     async (req, reply) => {
       if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
-      // Only a real proxy (a LAN peer adding the header) counts; a forged header from outside can't raise the banner.
-      if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) && isPrivateIp(req.socket.remoteAddress ?? ""))
-        noteProxy();
+      // (A proxy without TRUST_PROXY is noticed for every request in the guard: proxyWithoutTrust.)
       const username = String(req.body?.username ?? "");
       const password = String(req.body?.password ?? "");
       checkLoginSize(username, password);
       if (!loginAllowed(req.ip, username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
       const a = getSettings().auth;
       const okUser = safeEqual(username, a.username);
-      const okPass = await checkPasswordLimited(password, a.passwordHash || "00:00");
+      // The account's own name checks in its reserved slot, so a flood of other names can't refuse it.
+      const okPass = await checkPasswordLimited(password, a.passwordHash || "00:00", okUser);
       if (!okUser || !okPass) throw fail("Wrong username or password", 401);
       loginSucceeded(req.ip, a.username);
       sessionCookie(req, reply, a.username);
@@ -100,7 +97,7 @@ export function accountRoutes(app: FastifyInstance) {
       checkLoginSize(username, password);
       // Same throttle as login: a stolen session cookie shouldn't allow unlimited password guesses.
       if (!loginAllowed(req.ip, a.username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
-      if (!(await checkPasswordLimited(current, a.passwordHash))) throw fail("Current password is wrong", 403);
+      if (!(await checkPasswordLimited(current, a.passwordHash, true))) throw fail("Current password is wrong", 403);
       loginSucceeded(req.ip, a.username);
       if (password && password.length < 8) throw fail("New password must be at least 8 characters");
       if (password) await setAccount(username, password);

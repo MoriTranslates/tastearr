@@ -2,8 +2,9 @@ import crypto from "node:crypto";
 import net from "node:net";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { fail } from "../core/errors.js";
-import { inCidr, isHomeNetwork as inHomeNetwork, isLoopback } from "../core/network.js";
+import { inCidr, isHomeNetwork as inHomeNetwork, isLoopback, isPrivateIp } from "../core/network.js";
 import { checkPassword, safeEqual } from "../core/secrets.js";
+import { noteProxy } from "../services/health.js";
 import { validSession } from "../services/sessions.js";
 import { getSettings } from "../services/settings.js";
 
@@ -149,6 +150,7 @@ export function authState(req: FastifyRequest) {
 
 /** onRequest hook. Decides on the matched route pattern, never the raw URL, and denies /api by default. */
 export async function guard(req: FastifyRequest, reply: FastifyReply) {
+  if (proxyWithoutTrust(req)) noteProxy();
   const route = req.routeOptions.url;
   if (!route || !route.startsWith("/api/")) return; // static files / SPA fallback
   const cfg = req.routeOptions.config ?? {};
@@ -163,10 +165,19 @@ export async function guard(req: FastifyRequest, reply: FastifyReply) {
 /**
  * Login limits. Usernames and passwords longer than this are refused before the throttle or scrypt see them (each
  * throttle entry is kept for 30 minutes, so an uncapped username let one request pin up to the 1 MB body limit).
- * `perUser` free tries per IP + username and `perIp` per IP whatever the username (changing the name no longer resets
- * the throttle); `maxTracked` caps the table; `scryptSlots` password checks run at once, `scryptQueue` more may wait.
+ * `perUser` free tries per throttle entry. One IP gets its own entry for up to `namesPerIp` user names; further names
+ * from it share one entry, so rotating names neither resets the throttle nor grows the table. `maxTracked` caps the
+ * table; `scryptSlots` password checks run at once and `scryptQueue` more may wait.
  */
-export const LOGIN_LIMITS = { maxUser: 128, maxPassword: 1024, perUser: 5, perIp: 20, maxTracked: 10_000, scryptSlots: 2, scryptQueue: 16 };
+export const LOGIN_LIMITS = {
+  maxUser: 128,
+  maxPassword: 1024,
+  perUser: 5,
+  namesPerIp: 10,
+  maxTracked: 10_000,
+  scryptSlots: 2,
+  scryptQueue: 16,
+};
 
 /** Refuses an over-long username or password (400) before anything expensive runs. */
 export function checkLoginSize(username: string, password: string) {
@@ -174,74 +185,117 @@ export function checkLoginSize(username: string, password: string) {
   if (password.length > LOGIN_LIMITS.maxPassword) throw fail(`Passwords are at most ${LOGIN_LIMITS.maxPassword} characters`);
 }
 
-// In-memory login throttle per IP + username and per IP, with growing back-off instead of a hard lock-out.
-type Attempt = { n: number; until: number; seen: number };
+// In-memory login throttle, with growing back-off instead of a hard lock-out. Behind a proxy without TRUST_PROXY every
+// client shares one address, so nothing here may let junk logins from that address refuse the owner:
+// - "u:" entries are per IP + user name; one IP gets at most `namesPerIp` of them.
+// - Further names from that IP share its "s:" entry, which backs off like a single name.
+// - The account's own user name always keeps its own entry, so only guessing *that* name slows the owner down.
+// Trade-off: while an address floods made-up names, the real name answers 401 where junk names get 429, which can
+// reveal the user name to that flooder. The password is still needed, and guessing it is throttled on its own entry.
+type Attempt = { n: number; until: number; seen: number; ip: string };
 const attempts = new Map<string, Attempt>();
+/** Own ("u:") entries per IP. */
+const namesOf = new Map<string, number>();
 const STALE_MS = 30 * 60_000;
 let prunedAt = 0;
+const userKey = (ip: string, user: string) => `u:${ip}|${user.toLowerCase()}`;
+const sharedKey = (ip: string) => `s:${ip}`;
+
+function drop(key: string) {
+  const a = attempts.get(key);
+  if (!a) return;
+  attempts.delete(key);
+  if (!key.startsWith("u:")) return;
+  const n = (namesOf.get(a.ip) ?? 1) - 1;
+  if (n > 0) namesOf.set(a.ip, n);
+  else namesOf.delete(a.ip);
+}
 
 function prune(now: number) {
   if (now - prunedAt > 60_000) {
     prunedAt = now;
-    for (const [k, v] of attempts) if (now - v.seen > STALE_MS) attempts.delete(k);
+    for (const [k, v] of attempts) if (now - v.seen > STALE_MS) drop(k);
   }
-  // Oldest first (entries are re-inserted on every attempt): a flood of new keys can't grow the table without bound.
-  // Room is left for the two keys one attempt adds.
+  // Oldest first (entries are re-inserted on every attempt): a flood of new addresses can't grow the table without
+  // bound. Room is left for the entry this attempt may add.
   for (const k of attempts.keys()) {
-    if (attempts.size + 2 <= LOGIN_LIMITS.maxTracked) break;
-    attempts.delete(k);
+    if (attempts.size + 1 <= LOGIN_LIMITS.maxTracked) break;
+    drop(k);
   }
-}
-
-/** Counts one attempt on `key`; past `free` tries the next one waits 2s, 4s, 8s ... capped at 15s. */
-function count(key: string, free: number, now: number) {
-  const a = attempts.get(key) ?? { n: 0, until: 0, seen: now };
-  a.n++;
-  a.seen = now;
-  if (a.n > free) a.until = now + Math.min(15_000, 1000 * 2 ** (a.n - free));
-  attempts.delete(key);
-  attempts.set(key, a);
 }
 
 export function loginAllowed(ip: string, user: string) {
   const now = Date.now();
   prune(now);
-  const userKey = `${ip}|${user.toLowerCase()}`;
-  const ipKey = `${ip}|*`;
-  if ((attempts.get(userKey)?.until ?? 0) > now || (attempts.get(ipKey)?.until ?? 0) > now) return false;
-  // Password hashing (scrypt) is the real brake on guessing; a long lock would let anyone who knows the username keep
-  // the owner out (behind a proxy everyone shares one IP), so both throttles only slow down.
-  count(userKey, LOGIN_LIMITS.perUser, now);
-  count(ipKey, LOGIN_LIMITS.perIp, now);
+  const own = user.toLowerCase() === getSettings().auth.username.toLowerCase();
+  let key = userKey(ip, user);
+  if (!own && !attempts.has(key) && (namesOf.get(ip) ?? 0) >= LOGIN_LIMITS.namesPerIp) key = sharedKey(ip);
+  let a = attempts.get(key);
+  if (!a) {
+    a = { n: 0, until: 0, seen: now, ip };
+    if (key.startsWith("u:")) namesOf.set(ip, (namesOf.get(ip) ?? 0) + 1);
+  }
+  if (a.until > now) return false;
+  // 5 free tries, then 2s, 4s, 8s ... capped at 15s. Password hashing (scrypt) is the real brake on guessing; a long
+  // lock would let anyone who knows the username keep the owner out (behind a proxy everyone shares one IP).
+  a.n++;
+  a.seen = now;
+  if (a.n > LOGIN_LIMITS.perUser) a.until = now + Math.min(15_000, 1000 * 2 ** (a.n - LOGIN_LIMITS.perUser));
+  attempts.delete(key);
+  attempts.set(key, a);
   return true;
 }
 export function loginSucceeded(ip: string, user: string) {
-  attempts.delete(`${ip}|${user.toLowerCase()}`);
-  attempts.delete(`${ip}|*`);
+  drop(userKey(ip, user));
 }
 
 /** Login throttle entries (tests: the table stays bounded). */
 export const trackedLoginAttempts = () => attempts.size;
 
-// scrypt is deliberately slow; unbounded parallel checks would let a burst of requests tie up every CPU.
-let scryptActive = 0;
-const scryptWaiting: (() => void)[] = [];
+// scrypt is deliberately slow; unbounded parallel checks would let a burst of requests tie up every CPU. A login for
+// the account's own user name uses a separate reserved slot, so a flood of junk names filling the queue can't refuse
+// it. That lane has its own queue limit: only a flood that names the real user (from many addresses) can fill it.
+const lanes = { shared: { active: 0, waiting: [] as (() => void)[] }, owner: { active: 0, waiting: [] as (() => void)[] } };
 
-/** checkPassword with at most `scryptSlots` running at once; a full queue is refused (429) instead of growing. */
-export async function checkPasswordLimited(pw: string, stored: string) {
-  if (scryptActive < LOGIN_LIMITS.scryptSlots) scryptActive++;
+/**
+ * checkPassword with at most `scryptSlots` running at once and `scryptQueue` waiting (more are refused with 429).
+ * `owner` (the request names the account's own user name) runs in its own one-slot lane, with its own queue.
+ */
+export async function checkPasswordLimited(pw: string, stored: string, owner = false) {
+  const lane = owner ? lanes.owner : lanes.shared;
+  const slots = owner ? 1 : LOGIN_LIMITS.scryptSlots;
+  if (lane.active < slots) lane.active++;
   else {
-    if (scryptWaiting.length >= LOGIN_LIMITS.scryptQueue)
+    if (lane.waiting.length >= LOGIN_LIMITS.scryptQueue)
       throw fail("Too many login attempts at once, wait a few seconds and try again", 429);
-    await new Promise<void>((r) => scryptWaiting.push(r)); // the finishing check hands its slot over
+    await new Promise<void>((r) => lane.waiting.push(r)); // the finishing check hands its slot over
   }
   try {
     return await checkPassword(pw, stored);
   } finally {
-    const next = scryptWaiting.shift();
+    const next = lane.waiting.shift();
     if (next) next();
-    else scryptActive--;
+    else lane.active--;
   }
+}
+
+/**
+ * A request came through a proxy (forwarding headers from a LAN peer) while TRUST_PROXY isn't set: every client then
+ * looks like the proxy's address, so the login throttle and the logs see one client. Logged once per process and shown
+ * as a banner (`noteProxy`).
+ */
+let proxyLogged = false;
+export function proxyWithoutTrust(req: FastifyRequest) {
+  if (PROXY_TRUSTED || !(req.headers["x-forwarded-for"] || req.headers["x-real-ip"])) return false;
+  const peer = req.socket?.remoteAddress ?? "";
+  if (!isPrivateIp(peer)) return false; // a forged header straight from the internet proves nothing
+  if (!proxyLogged) {
+    proxyLogged = true;
+    console.warn(
+      `Requests are arriving through a proxy at ${peer}, but TRUST_PROXY isn't set: every client looks like one address (${peer}), so login throttling is shared by all of them. Set TRUST_PROXY to the proxy's IP address.`,
+    );
+  }
+  return true;
 }
 
 /** One-time token for claiming a fresh install from outside the local network; printed to the container log. */

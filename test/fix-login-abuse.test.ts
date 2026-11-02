@@ -64,14 +64,15 @@ test("a body far over the auth limit is refused without being parsed", async () 
   assert.equal(res.statusCode, 413);
 });
 
-test("changing the username on every try doesn't reset the throttle: the per-IP limit still applies", () => {
+test("changing the username on every try doesn't reset the throttle: names past the first few share one bucket", () => {
   const ip = "198.51.100.7";
   let allowed = 0;
   for (let i = 0; i < 40; i++) if (loginAllowed(ip, `user${i}`)) allowed++;
-  assert.equal(allowed, LOGIN_LIMITS.perIp + 1, "the per-IP free tries and the one that starts the back-off");
+  // One try each for the names with their own entry, then the shared bucket's free tries and the one that starts its back-off.
+  assert.equal(allowed, LOGIN_LIMITS.namesPerIp + LOGIN_LIMITS.perUser + 1);
   assert.equal(loginAllowed("198.51.100.8", "user0"), true, "another IP is unaffected");
+  assert.equal(loginAllowed(ip, "owner"), true, "the account's own name keeps its own entry (review #3)");
   loginSucceeded(ip, "owner");
-  assert.equal(loginAllowed(ip, "owner"), true, "a successful login clears the IP's back-off");
 });
 
 test("the same username from one IP still backs off after its own free tries", () => {
