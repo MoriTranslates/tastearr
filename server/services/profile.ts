@@ -103,6 +103,8 @@ export function storedProfile(): TasteProfile | null {
 
 let building: Promise<TasteProfile> | null = null;
 let lastFailure = 0;
+/** Why the last rebuild failed: a strict caller inside the retry pause is told this instead of getting the old profile. */
+let lastFailureMessage = "";
 /** After a failed build, the last good profile is used for this long before trying again (no AniList hammering). */
 export const PROFILE_RETRY_MS = 30 * 60_000;
 
@@ -111,6 +113,7 @@ export function rebuildProfile() {
   building ??= inBackground(() => buildProfile())
     .catch((e: unknown) => {
       lastFailure = Date.now();
+      lastFailureMessage = (e as Error).message;
       throw e;
     })
     .finally(() => (building = null));
@@ -128,7 +131,11 @@ export async function getProfile(maxAgeMs = 86_400_000, opts: { strict?: boolean
   const p = storedProfile();
   // A partial (provisional) profile is rebuilt as soon as the retry pause allows, so the first complete build replaces it.
   if (p && Date.now() - p.builtAt < (p.partial?.length ? Math.min(maxAgeMs, PROFILE_RETRY_MS) : maxAgeMs)) return p;
-  if (p && Date.now() - lastFailure < PROFILE_RETRY_MS) return p;
+  if (p && Date.now() - lastFailure < PROFILE_RETRY_MS) {
+    // Not retried yet (no AniList hammering), but the background refresh must not report the old profile as current.
+    if (opts.strict) throw new Error(lastFailureMessage || "The last taste profile rebuild failed");
+    return p;
+  }
   try {
     return await rebuildProfile();
   } catch (e) {

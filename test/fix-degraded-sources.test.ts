@@ -291,6 +291,27 @@ describe("fix review #2: a provisional profile when there is nothing to keep, an
   });
 });
 
+describe("fix review #4: the refresh's profile step fails inside the retry pause too", () => {
+  test("Sonarr down: a rebuild failed minutes ago (Picks opened), then the refresh runs; its profile step reports the failure", async () => {
+    const good = await buildProfile();
+    setValue("profile", JSON.stringify({ ...good, builtAt: 0 })); // due for a rebuild
+    configure({ autoAdd: { enabled: false } });
+    patchSettings((s) => ({ ...s, auth: { ...s.auth, passwordHash: "set" } }));
+    w.fail.sonarr = 503;
+    invalidateContext();
+    forgetSeries();
+    // Picks: a non-strict caller. The rebuild fails, the old profile is used, and rebuilds pause for PROFILE_RETRY_MS.
+    const used = await quietWarn(() => getProfile());
+    assert.equal(used.value.builtAt, 0);
+    // The refresh within that pause: strict must not quietly take the old profile.
+    await quietWarn(() => assert.rejects(getProfile(undefined, { strict: true }), /Kept the last taste profile/));
+    await quietWarn(() => refresh(() => undefined));
+    const r = job("refresh")!;
+    assert.equal(r.state, "error");
+    assert.match(r.detail, /taste profile: Kept the last taste profile because a source couldn't be read/);
+  });
+});
+
 describe("fix review #1: no season alert from an incomplete context", () => {
   const cur = seasonOf();
   beforeEach(() => {
