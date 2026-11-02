@@ -117,9 +117,27 @@ export interface Ctx {
 }
 
 let ctxCache: { at: number; ctx: Ctx } | null = null;
+/** A build in progress, shared by callers that arrive meanwhile (each one would otherwise rescan Sonarr and Plex). */
+let ctxBuilding: { gen: number; p: Promise<Ctx> } | null = null;
+/** Bumped by invalidateContext: a build that started before a change must not be cached or shared afterwards. */
+let ctxGen = 0;
 
 export async function context(force = false): Promise<Ctx> {
   if (!force && ctxCache && Date.now() - ctxCache.at < 10 * 60_000) return ctxCache.ctx;
+  if (ctxBuilding?.gen === ctxGen) return ctxBuilding.p;
+  const gen = ctxGen;
+  const p = buildContext(force).then((ctx) => {
+    if (gen === ctxGen) ctxCache = { at: Date.now(), ctx };
+    return ctx;
+  });
+  ctxBuilding = { gen, p };
+  void p.finally(() => {
+    if (ctxBuilding?.p === p) ctxBuilding = null;
+  }).catch(() => undefined);
+  return p;
+}
+
+async function buildContext(force: boolean): Promise<Ctx> {
   const s = getSettings();
   const sources: Record<string, string> = {};
   const { byAnilist, byTvdb, movieByAnilist, imdbByAnilist } = await mappingTables();
@@ -182,7 +200,6 @@ export async function context(force = false): Promise<Ctx> {
     hasHistory: lib.size > 0 || movies.size > 0 || watch.size > 0 || lists.size > 0,
     sources,
   };
-  ctxCache = { at: Date.now(), ctx };
   return ctx;
 }
 
@@ -555,7 +572,8 @@ export function streamingLinks(m: Media) {
   const seen = new Set<string>();
   const out: { site: string; url: string }[] = [];
   for (const l of m.externalLinks ?? []) {
-    if (l.type !== "STREAMING") continue;
+    // Community-edited data ends up in an <a href>: only real web links.
+    if (l.type !== "STREAMING" || !/^https?:\/\//i.test(l.url ?? "")) continue;
     const site = SERVICE_ALIASES[l.site] ?? l.site;
     if (seen.has(site)) continue;
     seen.add(site);
@@ -905,4 +923,5 @@ export function setFeedback(id: number, verdict: string | null, source = "picks"
 
 export function invalidateContext() {
   ctxCache = null;
+  ctxGen++;
 }

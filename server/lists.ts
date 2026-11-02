@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { db, transaction } from "./db.js";
 import { anilistUserList } from "./anilist.js";
 import { mappingTables } from "./mapping.js";
 import { getSettings } from "./settings.js";
@@ -10,16 +10,11 @@ import { getSettings } from "./settings.js";
 export interface ImportResult { source: string; entries: number }
 
 function save(source: string, rows: { id: number; status: string; score: number | null; progress: number | null }[]) {
-  db.exec("BEGIN");
-  try {
+  transaction(() => {
     db.prepare("DELETE FROM list_entries WHERE source = ?").run(source);
     const ins = db.prepare("INSERT OR REPLACE INTO list_entries (source, anilist_id, status, score, progress) VALUES (?, ?, ?, ?, ?)");
     for (const r of rows) ins.run(source, r.id, r.status, r.score, r.progress);
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+  });
 }
 
 export async function importAnilist(user: string): Promise<ImportResult> {

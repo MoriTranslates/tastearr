@@ -25,6 +25,12 @@ let tvdbByAnidb: Map<number, number> | null = null;
 let anilistByMovie: Map<number, number[]> | null = null;
 let loadedAt = 0;
 
+function push(m: Map<number, number[]>, k: number, v: number) {
+  const a = m.get(k);
+  if (a) a.push(v);
+  else m.set(k, [v]);
+}
+
 async function refresh() {
   const stale = !fs.existsSync(FILE) || Date.now() - fs.statSync(FILE).mtimeMs > MAX_AGE;
   if (stale) {
@@ -55,11 +61,11 @@ async function refresh() {
     const movie = Array.isArray(mv) ? mv[0] : mv;
     if (r.anilist_id && movie) {
       movieByAnilist.set(r.anilist_id, movie);
-      anilistByMovie.set(movie, [...(anilistByMovie.get(movie) ?? []), r.anilist_id]);
+      push(anilistByMovie, movie, r.anilist_id);
     }
     if (!r.anilist_id || !r.tvdb_id) continue;
     byAnilist.set(r.anilist_id, { tvdbId: r.tvdb_id, season: r.season?.tvdb ?? null });
-    byTvdb.set(r.tvdb_id, [...(byTvdb.get(r.tvdb_id) ?? []), r.anilist_id]);
+    push(byTvdb, r.tvdb_id, r.anilist_id);
   }
   // User-confirmed matches win over the community list.
   for (const o of db.prepare("SELECT anilist_id, tvdb_id, season FROM mapping_overrides").all() as { anilist_id: number; tvdb_id: number; season: number | null }[])
@@ -107,8 +113,12 @@ export function mappingFileAge() {
   return fs.existsSync(FILE) ? Date.now() - fs.statSync(FILE).mtimeMs : null;
 }
 
+/** One load at a time: requests arriving together (first page load, a stale list) share it instead of each downloading. */
+let loading: Promise<void> | null = null;
 async function ensure() {
-  if (!byAnilist || Date.now() - loadedAt > MAX_AGE) await refresh();
+  if (byAnilist && Date.now() - loadedAt <= MAX_AGE) return;
+  loading ??= refresh().finally(() => (loading = null));
+  await loading;
 }
 
 export async function mapAnilist(id: number): Promise<Mapping | null> {
