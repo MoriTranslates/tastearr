@@ -1,6 +1,6 @@
 import type { FastifyRequest } from "fastify";
-import type { Media } from "../server/anilist.js";
-import type { Ctx } from "../server/taste.js";
+import type { Media } from "../server/core/taste/media.js";
+import type { Ctx } from "../server/core/taste/types.js";
 
 export interface Call {
   url: string;

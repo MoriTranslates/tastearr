@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { CONFIG_DIR } from "../server/db.js";
-import { anilistIdsForTvdb, clearOverrides, mapAnilist, mappingFileAge, mappingTables, saveOverride } from "../server/mapping.js";
+import { CONFIG_DIR } from "../server/config.js";
+import { anilistIdsForTvdb, clearOverrides, mapAnilist, mappingFileAge, mappingTables, saveOverride } from "../server/services/mapping.js";
 import { json, mockFetch, sleep } from "./helpers.ts";
 
 const FIXTURE = [

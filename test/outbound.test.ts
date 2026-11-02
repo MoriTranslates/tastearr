@@ -1,7 +1,7 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockedHost, checkOutbound } from "../server/outbound.js";
+import { blockedHost, checkOutbound } from "../server/core/outbound.js";
 
 test("LAN, loopback, Docker and public addresses stay allowed (Sonarr/Radarr/Plex live there)", () => {
   for (const u of [

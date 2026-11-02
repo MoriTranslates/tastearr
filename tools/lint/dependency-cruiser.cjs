@@ -14,13 +14,19 @@ module.exports = {
       from: {},
       to: { circular: true },
     },
-    { name: "not-to-unresolvable", severity: "error", from: {}, to: { couldNotResolve: true } },
+    {
+      name: "not-to-unresolvable",
+      severity: "error",
+      comment: "vite/client is a type-only reference (vite-env.d.ts) that resolves through Vite's own types.",
+      from: {},
+      to: { couldNotResolve: true, pathNot: "^vite/client$" },
+    },
     {
       name: "core-is-pure",
       severity: "error",
       comment: "core/ is plain logic over plain data: no database, network, file system or other layers. Only shared types.",
       from: { path: layer("core") },
-      to: { pathNot: ["^server/core/", "^shared/", "^(node:)?(net|crypto)$"] },
+      to: { pathNot: ["^server/core/", "^shared/", "^(node:)?(net|crypto|util)$"] },
     },
     {
       name: "adapters-only-talk-outward",

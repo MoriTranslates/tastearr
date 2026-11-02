@@ -1,20 +1,10 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import {
-  csrfOk,
-  hostAllowed,
-  inCidr,
-  isHomeNetwork,
-  isLocalRequest,
-  makeSession,
-  revokeSession,
-  signAction,
-  trustProxyOption,
-  validSession,
-  verifyAction,
-} from "../server/auth.js";
-import { setAccount } from "../server/settings.js";
+import { inCidr } from "../server/core/network.js";
+import { csrfOk, hostAllowed, isHomeNetwork, isLocalRequest, trustProxyOption } from "../server/http/auth.js";
+import { makeSession, revokeSession, signAction, validSession, verifyAction } from "../server/services/sessions.js";
+import { setAccount } from "../server/services/settings.js";
 import { fakeReq } from "./helpers.ts";
 
 afterEach(() => {

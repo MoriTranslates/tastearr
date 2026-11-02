@@ -1,17 +1,9 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  checkPassword,
-  getSettings,
-  isMasked,
-  MASK,
-  patchSettings,
-  publicSettings,
-  safeEqual,
-  setAccount,
-  updateSettings,
-} from "../server/settings.js";
+import { checkPassword, safeEqual } from "../server/core/secrets.js";
+import { isMasked, MASK } from "../server/core/settings.js";
+import { getSettings, patchSettings, publicSettings, setAccount, updateSettings } from "../server/services/settings.js";
 
 const secrets = () =>
   patchSettings((s) => ({
@@ -42,8 +34,7 @@ test("first read creates the keys and signing secret", () => {
 test("publicSettings never sends a secret, hash or signing key to the browser", async () => {
   await setAccount("owner", "password123");
   secrets();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- typed once the API types are shared
-  const p = publicSettings() as Record<string, any>;
+  const p = publicSettings();
   const text = JSON.stringify(p);
   const s = getSettings();
   for (const v of [

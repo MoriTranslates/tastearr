@@ -1,10 +1,21 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { store } from "../server/anilist.js";
-import { patchSettings } from "../server/settings.js";
-import { labelOf, scoreCandidates, streamingLinks, toMatch, type Profile } from "../server/taste.js";
+import type { ScoredPick, TasteProfile as Profile } from "../shared/api.js";
+import { streamingLinks } from "../server/core/taste/features.js";
+import { labelOf as label } from "../server/core/taste/labels.js";
+import type { Media } from "../server/core/taste/media.js";
+import { scoreCandidates as score, toMatch, type ScoreOptions } from "../server/core/taste/score.js";
+import type { Ctx } from "../server/core/taste/types.js";
+import { storeMedia as store } from "../server/data/media.js";
+import { cachedMedia } from "../server/services/catalog.js";
+import { tasteEnv } from "../server/services/context.js";
+import { patchSettings } from "../server/services/settings.js";
 import { emptyCtx, media, tags } from "./helpers.ts";
+
+/** The engine with the app's current settings and media cache, as the picks service runs it. */
+const scoreCandidates = (c: Media[], p: Profile, ctx: Ctx, opts?: ScoreOptions): ScoredPick[] => score(c, p, ctx, tasteEnv(), opts);
+const labelOf = (id: number, ctx: Ctx) => label(id, ctx, cachedMedia);
 
 const stat = (lift: number) => ({ lift, n: 20, p: 20 * lift * 0.2 });
 const profile: Profile = {

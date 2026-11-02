@@ -2,10 +2,10 @@ import "./env.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { after, before, test } from "node:test";
-import { app, routes } from "../server/app.js";
-import { COOKIE, SETUP_TOKEN } from "../server/auth.js";
-import { CONFIG_DIR } from "../server/db.js";
-import { getSettings, setBypassLocal } from "../server/settings.js";
+import { CONFIG_DIR } from "../server/config.js";
+import { app, routes } from "../server/http/app.js";
+import { COOKIE, SETUP_TOKEN } from "../server/http/auth.js";
+import { getSettings, setBypassLocal } from "../server/services/settings.js";
 
 /** Routes that check their own credentials (webhook key, signed link) or must work before login. Anything else is guarded. */
 const PUBLIC = [

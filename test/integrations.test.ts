@@ -1,13 +1,15 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { db, transaction } from "../server/db.js";
-import { eachLimit, SEASON_CONCURRENCY, watchStates } from "../server/mediaserver.js";
-import { ntfyTarget, send } from "../server/notify.js";
-import { getSettings, patchSettings } from "../server/settings.js";
-import { flushPending, handleSonarrWebhook } from "../server/shows.js";
-import { monitorSeason, REFRESH_WAIT } from "../server/sonarr.js";
-import { context, invalidateContext } from "../server/taste.js";
+import { ntfyTarget } from "../server/adapters/notify.js";
+import { eachLimit, SEASON_CONCURRENCY } from "../server/core/concurrency.js";
+import { db, transaction } from "../server/data/db.js";
+import { context, invalidateContext } from "../server/services/context.js";
+import { watchStates } from "../server/services/mediaserver.js";
+import { send } from "../server/services/notify.js";
+import { getSettings, patchSettings } from "../server/services/settings.js";
+import { monitorSeason, REFRESH_WAIT } from "../server/services/sonarr.js";
+import { flushPending, handleSonarrWebhook } from "../server/services/webhooks.js";
 import { json, mockFetch, sleep } from "./helpers.ts";
 
 const quiet = <T>(fn: () => Promise<T>) => {

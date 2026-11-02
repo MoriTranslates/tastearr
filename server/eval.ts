@@ -6,8 +6,12 @@
  * with that season monitored or downloaded, or watched in Plex/Jellyfin, or on their list).
  * Prints AUC, precision@20 and R-precision per season and overall. Every taste change should be checked here.
  */
-import { getMediaByIds, getSeason, seasonOf, shiftSeason } from "./anilist.js";
-import { buildProfile, choseWithFiles, context, labelOf, scoreCandidates } from "./taste.js";
+import { choseWithFiles, labelOf } from "./core/taste/labels.js";
+import { seasonOf, shiftSeason } from "./core/taste/media.js";
+import { scoreCandidates } from "./core/taste/score.js";
+import { getMediaByIds, getSeason } from "./services/catalog.js";
+import { context, tasteEnv } from "./services/context.js";
+import { buildProfile } from "./services/profile.js";
 
 const SEASONS_BACK = Number(process.argv[2] ?? 5);
 
@@ -50,15 +54,15 @@ async function main() {
         ...new Set(got.flatMap((m) => (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id))),
       ];
     }
-    const picks = scoreCandidates(list, profile, ctx, { blind: true });
+    const picks = scoreCandidates(list, profile, ctx, tasteEnv(), { blind: true });
     // "Kept" = chose it in Sonarr/Radarr, or a clear positive from watch history / list / ratings.
     // Sonarr auto-monitors new seasons of owned series, so "monitored" alone isn't a choice: it needs files or progress.
-    const truth = new Map(list.map((m) => [m.id, choseWithFiles(m.id, ctx) || labelOf(m.id, ctx).p >= 1.2]));
+    const truth = new Map(list.map((m) => [m.id, choseWithFiles(m.id, ctx) || labelOf(m.id, ctx, tasteEnv().media).p >= 1.2]));
     const ranked = [...picks].sort((a, b) => b.score - a.score);
     const labels = ranked.map((p) => truth.get(p.id) ?? false);
     const pos = labels.filter(Boolean).length;
     ranked.forEach((p, k) => all.push({ score: p.score, kept: labels[k] }));
-    for (const p of ranked) watched.push({ score: p.score, seen: labelOf(p.id, ctx).p >= 1.5 });
+    for (const p of ranked) watched.push({ score: p.score, seen: labelOf(p.id, ctx, tasteEnv().media).p >= 1.5 });
     rows.push({
       name: `${target.season} ${target.year}`,
       n: list.length,
