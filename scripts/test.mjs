@@ -8,7 +8,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const dir = path.join(os.tmpdir(), "tastearr-tests");
+// One folder per run, so two runs at once (CI shards, several worktrees) never wipe each other's files.
+const dir = path.join(os.tmpdir(), `tastearr-tests-${process.pid}`);
 const wipe = () => fs.rmSync(dir, { recursive: true, force: true });
 wipe();
 fs.mkdirSync(dir, { recursive: true });
