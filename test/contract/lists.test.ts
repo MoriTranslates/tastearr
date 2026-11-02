@@ -92,7 +92,11 @@ describe("AniList", () => {
     try {
       assert.equal((await searchTitle("x")).length, 1);
       assert.equal(m.calls.length, 2);
-      assert.ok(waits.includes(7000), `waited ${waits}`);
+      // The pause is measured a moment after AniList asked for it, so it can be a few ms short of 7 s.
+      assert.ok(
+        waits.some((ms) => ms > 6900 && ms <= 7000),
+        `waited ${waits}`,
+      );
     } finally {
       m.restore();
     }
