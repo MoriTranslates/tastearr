@@ -30,6 +30,10 @@ export interface LibrarySeries {
   seasons: LibrarySeason[];
   /** Address of the Sonarr instance it lives in ("" = the main one). */
   instance?: string;
+  /** First-air year, network and overview, as Sonarr's search returns them. */
+  year?: number;
+  network?: string;
+  overview?: string;
   [k: string]: unknown;
 }
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, type Settings as S, type Status } from "../api";
 import { SecretInput, useToast } from "../components/ui";
+import { errorMessage } from "../lib/errors";
 
-export function Security({ s, status, save: _save }: { s: S; status: Status; save: (p: Partial<S>) => Promise<S> }) {
+export function Security({ s, status }: { s: S; status: Status }) {
   const toast = useToast();
   const [bypass, setBypass] = useState(s.auth.bypassLocal);
   const [acct, setAcct] = useState({ currentPassword: "", username: s.auth.username, password: "" });
@@ -19,7 +20,7 @@ export function Security({ s, status, save: _save }: { s: S; status: Status; sav
       await api("/auth/mode", { method: "PUT", body: { bypassLocal: bypass } });
       toast("Saved");
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
   async function saveAccount() {
@@ -28,7 +29,7 @@ export function Security({ s, status, save: _save }: { s: S; status: Status; sav
       setAcct({ ...acct, currentPassword: "", password: "" });
       toast("Account updated");
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
   async function regen(which: "apiKey" | "webhookKey") {
@@ -44,7 +45,7 @@ export function Security({ s, status, save: _save }: { s: S; status: Status; sav
       setKeys((k) => (k ? { ...k, ...r } : k));
       toast(`New ${what} created`);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
   async function resetMatches() {
@@ -53,7 +54,7 @@ export function Security({ s, status, save: _save }: { s: S; status: Status; sav
       const r = await api<{ cleared: number }>("/mapping/reset", { body: {} });
       toast(`Forgot ${r.cleared} match${r.cleared === 1 ? "" : "es"}`);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
   async function logout() {

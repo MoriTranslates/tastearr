@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AddPlan, type Candidate, type Pick } from "../api";
 import { Modal, Spinner } from "../components/ui";
 import type { CardProps, Mode } from "./types";
+import { errorMessage } from "../lib/errors";
 
 /** One preview dialog for every Sonarr/Radarr write: add, add after picking a match, and "get season N". */
 export function AddDialog({
@@ -45,9 +46,9 @@ export function AddDialog({
           if (x.needsMatch && !q)
             api<Candidate[]>(`/picks/${p.id}/candidates`)
               .then(setCands)
-              .catch((e) => setError(e.message));
+              .catch((e) => setError(errorMessage(e)));
         })
-        .catch((e) => mine === req.current && setError(e.message));
+        .catch((e) => mine === req.current && setError(errorMessage(e)));
     },
     [p.id],
   );
@@ -111,7 +112,7 @@ export function AddDialog({
       }
       onClose();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

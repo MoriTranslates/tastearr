@@ -3,6 +3,7 @@ import { api, type ArrOptions, type Settings } from "../api";
 import { Chips, Pill, SecretInput, useToast } from "../components/ui";
 import { unsaved } from "./unsaved";
 import type { Save } from "./useSettings";
+import { errorMessage } from "../lib/errors";
 
 export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr"; s: Settings; save: Save; onSaved?: () => void }) {
   const toast = useToast();
@@ -26,7 +27,7 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
     } catch (e) {
       setVersion(null);
       setFailed(true);
-      if (!quiet) toast(`${name}: ${(e as Error).message}`, true);
+      if (!quiet) toast(`${name}: ${errorMessage(e)}`, true);
     } finally {
       setBusy(false);
     }
@@ -47,7 +48,7 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
       toast(`${name} saved`);
       onSaved?.();
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }

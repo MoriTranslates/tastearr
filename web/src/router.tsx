@@ -15,7 +15,15 @@ export function Link({
   current?: boolean;
 }) {
   return (
-    <a href={to} className={className} aria-current={current ? "page" : undefined} onClick={(e) => (e.preventDefault(), navigate(to))}>
+    <a
+      href={to}
+      className={className}
+      aria-current={current ? "page" : undefined}
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(to);
+      }}
+    >
       {children}
     </a>
   );

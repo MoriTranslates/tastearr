@@ -1,4 +1,5 @@
 import net from "node:net";
+import { AppError } from "./errors.js";
 
 /**
  * Addresses Tastearr must never send requests (and API keys) to: link-local (169.254/16, where cloud metadata services
@@ -45,8 +46,11 @@ export function blockedHost(hostname: string) {
   return false;
 }
 
-export class OutboundError extends Error {
-  statusCode = 400;
+/** A bad or forbidden address the user typed: always a 400. */
+export class OutboundError extends AppError {
+  constructor(message: string) {
+    super(message, 400);
+  }
 }
 
 /**

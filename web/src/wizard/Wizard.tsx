@@ -9,6 +9,7 @@ import { MediaCard } from "../settings/MediaCard";
 import { unsaved } from "../settings/unsaved";
 import { useSettings } from "../settings/useSettings";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { errorMessage } from "../lib/errors";
 
 type Mode = "server" | "stream";
 const STEPS: Record<Mode, string[]> = {
@@ -19,7 +20,7 @@ const STEPS: Record<Mode, string[]> = {
 /** First-run guide. Starts by asking how the person watches, so streaming-only users never see server jargon. */
 export function Wizard({ status, onDone }: { status: Status; onDone: () => void }) {
   usePageTitle("Get started");
-  const { s, setS, save, error } = useSettings();
+  const { s, save, reload, error, toast } = useSettings();
   const [mode, setMode] = useState<Mode | null>(status.mode ? (status.mode as Mode) : null);
   const [step, setStep] = useState(0);
   const [gen, setGen] = useState(0);
@@ -85,7 +86,16 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
       {name === "Download apps" && (
         <>
           <p className="muted small">Connect Sonarr (shows) and Radarr (movies) if you use them. Skip either one with Next.</p>
-          <AutoDetect onUsed={() => api("/settings").then((x) => (setS(x as never), setGen((g) => g + 1), onDone()))} />
+          <AutoDetect
+            onUsed={() =>
+              reload()
+                .then(() => {
+                  setGen((g) => g + 1);
+                  onDone();
+                })
+                .catch((e) => toast(errorMessage(e), true))
+            }
+          />
           <ArrCard key={`sonarr-${gen}`} kind="sonarr" s={s} save={saveAndRefresh} />
           <ArrCard key={`radarr-${gen}`} kind="radarr" s={s} save={saveAndRefresh} />
         </>
@@ -167,7 +177,7 @@ function Build({ status, onDone }: { status: Status; onDone: () => void }) {
         }
         timer = setTimeout(poll, 1500);
       } catch (e) {
-        if (alive) setError((e as Error).message);
+        if (alive) setError(errorMessage(e));
       }
     };
     api<{ startedAt?: number }>("/profile/rebuild", { body: {} })
@@ -175,7 +185,7 @@ function Build({ status, onDone }: { status: Status; onDone: () => void }) {
         if (r.startedAt) started.current = Number(r.startedAt) + 2000;
         timer = setTimeout(poll, 800);
       })
-      .catch((e) => alive && setError((e as Error).message));
+      .catch((e) => alive && setError(errorMessage(e)));
     return () => {
       alive = false;
       clearTimeout(timer);

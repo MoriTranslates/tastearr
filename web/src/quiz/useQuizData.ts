@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Pref } from "../api";
 import type { QuizData } from "./types";
+import { errorMessage } from "../lib/errors";
 
 /** The quiz questions plus the viewer's genre answers and gore toggle (both editable locally). */
 export function useQuizData() {
@@ -18,7 +19,7 @@ export function useQuizData() {
         setPrefs(d.genrePrefs);
         setNoGore(d.noGore);
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(errorMessage(e)));
   }, [reload]);
 
   return { data, setData, error, retry: () => setReload((x) => x + 1), prefs, setPrefs, noGore, setNoGore };

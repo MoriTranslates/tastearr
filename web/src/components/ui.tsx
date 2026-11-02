@@ -1,3 +1,4 @@
+import { FOCUSABLE, trapTarget } from "../lib/focus";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 // ---------------------------------------------------------------- toasts
@@ -64,28 +65,17 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>("button, select, input")?.focus();
+    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const controls = () => [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
+    controls()[0]?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close.current();
-      if (e.key !== "Tab" || !ref.current) return;
-      // Focus fell out (the element holding it was removed): bring it back in.
-      if (!ref.current.contains(document.activeElement)) {
-        e.preventDefault();
-        ref.current.querySelector<HTMLElement>("button, select, input")?.focus();
-        return;
-      }
-      // Keep Tab inside the dialog.
-      const items = [...ref.current.querySelectorAll<HTMLElement>("button:not([disabled]), select, input:not([disabled]), a[href]")];
-      if (!items.length) return;
-      const [first, last] = [items[0], items[items.length - 1]];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key !== "Tab") return;
+      // Keep Tab inside the dialog; if focus fell out (its element was removed), bring it back in.
+      const target = trapTarget(controls(), document.activeElement, e.shiftKey);
+      if (!target) return;
+      e.preventDefault();
+      target.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => {

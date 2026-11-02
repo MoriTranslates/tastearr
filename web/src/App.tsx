@@ -11,6 +11,7 @@ import { Taste } from "./taste/Taste";
 import { Wizard } from "./wizard/Wizard";
 import { Link } from "./router";
 import { ToastProvider } from "./components/ui";
+import { errorMessage } from "./lib/errors";
 
 const NAV = [
   { path: "/", label: "Picks", icon: "★" },
@@ -29,7 +30,7 @@ export function App() {
       setStatus(await api<Status>("/status"));
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     }
   }, []);
 

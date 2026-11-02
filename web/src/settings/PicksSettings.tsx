@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, store, type Settings as S } from "../api";
 import { ListInput, NumberInput, useToast } from "../components/ui";
 import { Link } from "../router";
+import { errorMessage } from "../lib/errors";
 
 /** Common legal streaming sites (AniList's names), for "my services". */
 const SERVICES = [
@@ -41,7 +42,7 @@ export function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Prom
         toast("Saved. Re-learning your taste (takes a minute)…");
       } else toast("Saved");
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }

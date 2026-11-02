@@ -4,6 +4,7 @@ import { useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { relTime } from "../lib/format";
 import { useHealth, useSystemInfo } from "./useSystem";
+import { errorMessage } from "../lib/errors";
 
 const JOB_NAMES: Record<string, string> = { profile: "Build taste profile", refresh: "Refresh seasons & alerts" };
 
@@ -37,7 +38,7 @@ export function System() {
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setPw("");
     } catch (err) {
-      toast((err as Error).message, true);
+      toast(errorMessage(err), true);
     } finally {
       setSaving(false);
     }
@@ -124,7 +125,7 @@ export function System() {
           onClick={() =>
             api("/profile/rebuild", { body: {} })
               .then(() => toast("Rebuilding your taste profile"))
-              .catch((e) => toast(e.message, true))
+              .catch((e) => toast(errorMessage(e), true))
           }
         >
           Rebuild taste profile now

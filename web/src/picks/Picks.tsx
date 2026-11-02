@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { seasonName, store, type Pick, type Season, type Section, type Status } from "../api";
+import { seasonName, store, type Pick, type Section, type Status } from "../api";
 import { ErrorBox, Spinner, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { AddDialog } from "./AddDialog";
@@ -9,24 +9,14 @@ import { PickSections } from "./PickSections";
 import { Schedule } from "./Schedule";
 import { Toolbar } from "./Toolbar";
 import { isMobile } from "./helpers";
+import { readPicksQuery } from "./query";
 import type { Mode } from "./types";
 import { usePickFilters } from "./usePickFilters";
 import { usePicks, useTopPick, useVisiblePicks } from "./usePicks";
 
-function readQuery(status: Status) {
-  const q = new URLSearchParams(location.search);
-  const season = q.get("season")?.toUpperCase() as Season | undefined;
-  const year = Number(q.get("year"));
-  return {
-    sel: season && year ? { season, year } : status.season!,
-    view: ((q.get("view") ?? store.get("view", "grid")) === "schedule" ? "schedule" : "grid") as "grid" | "schedule",
-    day: q.get("day") !== null && q.get("day") !== "" ? Number(q.get("day")) : null,
-  };
-}
-
 export function Picks({ status }: { status: Status }) {
   const hideShorts = status.prefs?.hideShorts ?? false;
-  const init = useMemo(() => readQuery(status), [status]);
+  const init = useMemo(() => readPicksQuery(location.search, status, store.get("view", "grid")), [status]);
   const toast = useToast();
   const [sel, setSel] = useState(init.sel);
   const [view, setView] = useState(init.view);
@@ -35,7 +25,10 @@ export function Picks({ status }: { status: Status }) {
   const [collapsed, setCollapsedRaw] = useState<Section[]>(
     () => store.get<Section[] | null>("collapsed", null) ?? (hideShorts ? ["shorts"] : []),
   );
-  const setCollapsed = (v: Section[]) => (setCollapsedRaw(v), store.set("collapsed", v));
+  const setCollapsed = (v: Section[]) => {
+    setCollapsedRaw(v);
+    store.set("collapsed", v);
+  };
   const [lowOpen, setLowOpen] = useState<Section[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(() => !isMobile());
   const { key, picks, error, rebuilding, patch, retry, refreshFromAniList } = usePicks(sel, !!status.building);

@@ -5,6 +5,7 @@ import { ErrorBox, Spinner, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type { Found, Option } from "./types";
 import { useQuizData } from "./useQuizData";
+import { errorMessage } from "../lib/errors";
 
 const ANSWERS = [
   { v: "loved", label: "Loved" },
@@ -46,7 +47,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
       setStep(2);
       scrollTo(0, 0);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setSaving(false);
     }
@@ -60,7 +61,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
       await api("/feedback", { body: { id: s.id, verdict: next, source: "quiz" } });
     } catch (e) {
       set(current);
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
 
@@ -73,7 +74,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
       // AniList requests queue behind any background refresh; don't leave the button hanging forever.
       setFound(await api<Found[]>(`/quiz/search?q=${encodeURIComponent(q.trim())}`, { signal: AbortSignal.timeout(30_000) }));
     } catch (err) {
-      toast((err as Error).name === "TimeoutError" ? "AniList is busy right now. Try again in a minute." : (err as Error).message, true);
+      toast((err as Error).name === "TimeoutError" ? "AniList is busy right now. Try again in a minute." : errorMessage(err), true);
     } finally {
       setSearching(false);
     }
@@ -103,7 +104,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
       toast("Getting your picks ready…");
       navigate("/");
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setSaving(false);
     }

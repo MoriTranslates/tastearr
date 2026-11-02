@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type Settings } from "../api";
 import { Chips, Pill, SecretInput, useToast } from "../components/ui";
 import type { Save } from "./useSettings";
+import { errorMessage } from "../lib/errors";
 
 interface PlexServer {
   id: string;
@@ -56,7 +57,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
     } catch (e) {
       setInfo(null);
       setFailed(true);
-      if (!quiet) toast((e as Error).message, true);
+      if (!quiet) toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
@@ -93,7 +94,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       toast("Plex sign-in timed out", true);
     } catch (e) {
       popup?.close();
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     }
   }
 
@@ -112,7 +113,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       setPlex(null);
       toast(`Connected to ${r.name}. Now tick your anime libraries and save.`);
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
@@ -125,7 +126,7 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       toast("Watch history saved");
       onSaved?.();
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }

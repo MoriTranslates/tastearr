@@ -80,7 +80,7 @@ const words = (t: string) =>
 /** How well a Sonarr search result `x` matches the show's titles and start year. */
 export function rateTitleMatch(x: LibrarySeries, titles: string[], year: number | null, owned: Set<number>): TitleMatch {
   const want = words(titles.join(" "));
-  const y = (x.year as number | undefined) || null;
+  const y = x.year || null;
   const have = words(x.title);
   // Shared words over the longer of the two titles, so "Dark Blue" doesn't look like a match for a long title.
   const shared = [...have].filter((w) => want.has(w)).length;
@@ -93,9 +93,9 @@ export function rateTitleMatch(x: LibrarySeries, titles: string[], year: number 
     tvdbId: x.tvdbId,
     title: x.title,
     year: y,
-    network: (x.network as string | undefined) ?? null,
+    network: x.network ?? null,
     seasons: x.seasons.map((z) => z.seasonNumber).filter((n) => n > 0),
-    overview: ((x.overview as string | undefined) ?? "").slice(0, 200) || null,
+    overview: (x.overview ?? "").slice(0, 200) || null,
     inLibrary: owned.has(x.tvdbId),
     // Half the words in common or more: worth offering as "Is this it?". Below that, just list them.
     confident: overlap >= 0.5 && (shared >= 2 || have.size === 1),

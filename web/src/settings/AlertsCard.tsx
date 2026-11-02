@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Settings } from "../api";
 import { NumberInput, SecretInput, useToast } from "../components/ui";
 import type { Save } from "./useSettings";
+import { errorMessage } from "../lib/errors";
 
 export function AlertsCard({ s, save, simple }: { s: Settings; save: Save; simple?: boolean }) {
   const toast = useToast();
@@ -23,7 +24,7 @@ export function AlertsCard({ s, save, simple }: { s: Settings; save: Save; simpl
         toast(r.sent.length ? `Test sent to ${r.sent.join(", ")}. Check your phone.` : "Nothing set up to send to yet", !r.sent.length);
       } else toast("Alerts saved");
     } catch (e) {
-      toast((e as Error).message, true);
+      toast(errorMessage(e), true);
     } finally {
       setBusy(false);
     }
