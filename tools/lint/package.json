@@ -1,0 +1,16 @@
+{
+  "name": "tastearr-lint",
+  "private": true,
+  "description": "Lint, format and dependency-rule tooling. Kept apart from the app because typescript-eslint and dependency-cruiser need TypeScript's JS API, which TypeScript 7 (the app's compiler) no longer ships.",
+  "type": "module",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "dependency-cruiser": "^18.7.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1"
+  }
+}

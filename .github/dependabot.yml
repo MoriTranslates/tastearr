@@ -11,3 +11,8 @@ updates:
     schedule: { interval: weekly }
     groups:
       all: { patterns: ["*"] }
+  - package-ecosystem: npm
+    directory: /tools/lint
+    schedule: { interval: weekly }
+    groups:
+      all: { patterns: ["*"] }

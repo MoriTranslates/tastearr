@@ -1,0 +1,11 @@
+node_modules
+dist
+.devconfig*
+package-lock.json
+tools/lint/node_modules
+*.md
+unraid
+web/public
+docs
+LICENSE
+.github
