@@ -46,7 +46,15 @@ export interface Settings {
   /** services: streaming sites the user has; shown first on cards and used as the default Schedule filter. */
   display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
   /** Picks at or above minMatch go to Sonarr/Radarr on their own (off by default). */
-  autoAdd: { enabled: boolean; minMatch: number; newShows: boolean; sequels: boolean; movies: boolean; maxPerSeason: number; search: boolean };
+  autoAdd: {
+    enabled: boolean;
+    minMatch: number;
+    newShows: boolean;
+    sequels: boolean;
+    movies: boolean;
+    maxPerSeason: number;
+    search: boolean;
+  };
   /** How the user watches: "server" (Sonarr/Plex) or "stream" (Crunchyroll etc.). Shapes the setup guide and wording. */
   mode: "server" | "stream" | "";
   /** Quiz genre answers. "never" genres are excluded outright. */
@@ -82,7 +90,16 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  sonarr: { url: "", apiKey: "", qualityProfileId: null, rootFolderPath: "", tags: [], sequelMonitor: "newSeason", searchOnAdd: true, dropAction: "unmonitor" },
+  sonarr: {
+    url: "",
+    apiKey: "",
+    qualityProfileId: null,
+    rootFolderPath: "",
+    tags: [],
+    sequelMonitor: "newSeason",
+    searchOnAdd: true,
+    dropAction: "unmonitor",
+  },
   sonarrExtra: [],
   radarr: { url: "", apiKey: "", qualityProfileId: null, rootFolderPath: "", tags: [], minimumAvailability: "released", searchOnAdd: true },
   media: { type: "none", url: "", token: "", userId: "", libraryIds: [] },
@@ -93,7 +110,18 @@ const DEFAULTS: Settings = {
   autoAdd: { enabled: false, minMatch: 85, newShows: true, sequels: true, movies: false, maxPerSeason: 10, search: true },
   mode: "",
   genrePrefs: {},
-  notify: { discordWebhook: "", ntfyUrl: "", ntfyToken: "", gotifyUrl: "", gotifyToken: "", picks: 10, seasonAlerts: true, episodeAlerts: true, airingAlerts: true, airingDelayMin: 60 },
+  notify: {
+    discordWebhook: "",
+    ntfyUrl: "",
+    ntfyToken: "",
+    gotifyUrl: "",
+    gotifyToken: "",
+    picks: 10,
+    seasonAlerts: true,
+    episodeAlerts: true,
+    airingAlerts: true,
+    airingDelayMin: 60,
+  },
   externalUrl: "",
   auth: { username: "", passwordHash: "", bypassLocal: false },
   apiKey: "",
@@ -102,7 +130,15 @@ const DEFAULTS: Settings = {
   secret: "",
 };
 
-const SECRET_PATHS = ["sonarr.apiKey", "radarr.apiKey", "media.token", "notify.discordWebhook", "notify.ntfyToken", "notify.gotifyToken", "lists.malClientId"] as const;
+const SECRET_PATHS = [
+  "sonarr.apiKey",
+  "radarr.apiKey",
+  "media.token",
+  "notify.discordWebhook",
+  "notify.ntfyToken",
+  "notify.gotifyToken",
+  "lists.malClientId",
+] as const;
 /** Settings the browser may change through PUT /api/settings. Everything else has its own endpoint. */
 const EDITABLE = ["sonarr", "radarr", "media", "lists", "training", "filters", "display", "autoAdd", "notify", "externalUrl", "mode"];
 /** Each secret is only valid for the address it was saved with: if the address changes, a masked secret is dropped. */
@@ -130,7 +166,14 @@ const OUTBOUND_URLS: [string, string][] = [
   ["notify.ntfyUrl", "The ntfy address"],
   ["notify.gotifyUrl", "The Gotify address"],
 ];
-const RANGES: Record<string, [number, number]> = { "training.seasons": [2, 24], "training.minTagRank": [0, 100], "notify.picks": [3, 30], "notify.airingDelayMin": [0, 1440], "autoAdd.minMatch": [50, 100], "autoAdd.maxPerSeason": [1, 50] };
+const RANGES: Record<string, [number, number]> = {
+  "training.seasons": [2, 24],
+  "training.minTagRank": [0, 100],
+  "notify.picks": [3, 30],
+  "notify.airingDelayMin": [0, 1440],
+  "autoAdd.minMatch": [50, 100],
+  "autoAdd.maxPerSeason": [1, 50],
+};
 
 export const MASK = "••••••••";
 /** True for the mask (or a mangled copy of it); real keys are printable ASCII. */
@@ -164,7 +207,8 @@ function sanitize(shape: unknown, patch: unknown, path = ""): unknown {
     }
     return out;
   }
-  if (path === "sonarr.qualityProfileId" || path === "radarr.qualityProfileId") return patch === null || patch === "" ? null : Number.isFinite(Number(patch)) ? Number(patch) : undefined;
+  if (path === "sonarr.qualityProfileId" || path === "radarr.qualityProfileId")
+    return patch === null || patch === "" ? null : Number.isFinite(Number(patch)) ? Number(patch) : undefined;
   if (typeof shape === "boolean") return typeof patch === "boolean" ? patch : undefined;
   if (typeof shape === "number") {
     const n = Number(patch);
@@ -189,16 +233,26 @@ export function getSettings(): Settings {
   const stored = row ? (JSON.parse(row.value) as Record<string, unknown>) : {};
   let s = merge(DEFAULTS, stored);
   // v0.1 had auth.enabled and a local bypass that defaulted on; v0.2 always requires an account.
-  if (stored.auth && "enabled" in (stored.auth as object)) s = { ...s, auth: { username: s.auth.username, passwordHash: s.auth.passwordHash, bypassLocal: false } };
+  if (stored.auth && "enabled" in (stored.auth as object))
+    s = { ...s, auth: { username: s.auth.username, passwordHash: s.auth.passwordHash, bypassLocal: false } };
   const missing = !s.apiKey || !s.secret || !s.webhookKey || !s.plexClientId;
-  if (missing) s = { ...s, apiKey: s.apiKey || rand(16), secret: s.secret || rand(32), webhookKey: s.webhookKey || rand(16), plexClientId: s.plexClientId || crypto.randomUUID() };
+  if (missing)
+    s = {
+      ...s,
+      apiKey: s.apiKey || rand(16),
+      secret: s.secret || rand(32),
+      webhookKey: s.webhookKey || rand(16),
+      plexClientId: s.plexClientId || crypto.randomUUID(),
+    };
   if (missing || (stored.auth && "enabled" in (stored.auth as object))) write(s);
   cache = s;
   return s;
 }
 
 function write(s: Settings) {
-  db.prepare("INSERT INTO settings (key, value) VALUES ('settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(s));
+  db.prepare("INSERT INTO settings (key, value) VALUES ('settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
+    JSON.stringify(s),
+  );
   cache = s;
 }
 
@@ -259,7 +313,8 @@ export function updateSettings(patch: unknown) {
     const v = String(getPath(next, p) ?? "");
     if (v && v !== getPath(cur, p)) checkOutbound(v, what);
   }
-  if (next.externalUrl && next.externalUrl !== cur.externalUrl && !/^https?:\/\/[^/]/i.test(next.externalUrl)) throw new OutboundError("The external address must start with http:// or https://");
+  if (next.externalUrl && next.externalUrl !== cur.externalUrl && !/^https?:\/\/[^/]/i.test(next.externalUrl))
+    throw new OutboundError("The external address must start with http:// or https://");
   write(next);
   return next;
 }

@@ -37,5 +37,8 @@ export default tseslint.config(
       "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
     },
   },
-  ...Object.entries(LARGE_FILES).map(([file, max]) => ({ files: [file], rules: { "max-lines": ["error", { max, skipBlankLines: true, skipComments: true }] } })),
+  ...Object.entries(LARGE_FILES).map(([file, max]) => ({
+    files: [file],
+    rules: { "max-lines": ["error", { max, skipBlankLines: true, skipComments: true }] },
+  })),
 );

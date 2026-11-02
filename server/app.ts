@@ -5,7 +5,23 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { cachedMedia, getMediaByIds, searchTitle, seasonOf, shiftSeason, SEASONS, type Season } from "./anilist.js";
-import { authState, COOKIE, csrfOk, guard, hostAllowed, isLocalRequest, isPrivateIp, loginAllowed, loginSucceeded, makeSession, PROXY_TRUSTED, revokeSession, SETUP_TOKEN, trustProxyOption, verifyAction } from "./auth.js";
+import {
+  authState,
+  COOKIE,
+  csrfOk,
+  guard,
+  hostAllowed,
+  isLocalRequest,
+  isPrivateIp,
+  loginAllowed,
+  loginSucceeded,
+  makeSession,
+  PROXY_TRUSTED,
+  revokeSession,
+  SETUP_TOKEN,
+  trustProxyOption,
+  verifyAction,
+} from "./auth.js";
 import { CONFIG_DIR, db, listJobs, setJob } from "./db.js";
 import { autoAddCandidates, autoAddHistory, firstOfMany, runAutoAdd } from "./autoadd.js";
 import { discover, useDiscovered } from "./discover.js";
@@ -17,9 +33,32 @@ import { send } from "./notify.js";
 import { checkOutbound } from "./outbound.js";
 import { getQuiz } from "./quiz.js";
 import { addMovie, radarrOptions, testRadarr } from "./radarr.js";
-import { checkPassword, getSettings, isMasked, patchSettings, publicSettings, regenerateKey, safeEqual, setAccount, setBypassLocal, setGenrePrefs, updateSettings, type Settings } from "./settings.js";
+import {
+  checkPassword,
+  getSettings,
+  isMasked,
+  patchSettings,
+  publicSettings,
+  regenerateKey,
+  safeEqual,
+  setAccount,
+  setBypassLocal,
+  setGenrePrefs,
+  updateSettings,
+  type Settings,
+} from "./settings.js";
 import { dropShow, handleRadarrWebhook, handleSonarrWebhook, myShows, undropShow } from "./shows.js";
-import { addSeries, forgetSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrOptions, sonarrSeries, testSonarr } from "./sonarr.js";
+import {
+  addSeries,
+  forgetSeries,
+  lookupByTitle,
+  monitorSeason,
+  planAdd,
+  seriesMonitored,
+  sonarrOptions,
+  sonarrSeries,
+  testSonarr,
+} from "./sonarr.js";
 import { invalidateContext, isBuilding, rebuildProfile, recommend, setFeedback, storedProfile, title } from "./taste.js";
 
 function findPackageJson() {
@@ -37,14 +76,20 @@ const STARTED = Date.now();
 const redact = (url: string) => url.split("?")[0].replace(/(\/api\/(?:webhook|importlist)\/\w+\/)[^/]+/, "$1***");
 
 export const app = Fastify({
-  logger: { level: process.env.LOG_LEVEL ?? "info", serializers: { req: (r) => ({ method: r.method, url: redact(r.url), remoteAddress: r.ip }) } },
+  logger: {
+    level: process.env.LOG_LEVEL ?? "info",
+    serializers: { req: (r) => ({ method: r.method, url: redact(r.url), remoteAddress: r.ip }) },
+  },
   // proxy-addr accepts a hop count too; Fastify's types only list string | string[] | boolean.
   trustProxy: trustProxyOption() as string[] | false,
   bodyLimit: 1_000_000,
 });
 /** Every route as registered, so tests can check that each one is guarded. */
 export const routes: { method: string | string[]; url: string; config: { public?: boolean; setup?: boolean } }[] = [];
-app.addHook("onRoute", (r) => void routes.push({ method: r.method, url: r.url, config: (r.config ?? {}) as { public?: boolean; setup?: boolean } }));
+app.addHook(
+  "onRoute",
+  (r) => void routes.push({ method: r.method, url: r.url, config: (r.config ?? {}) as { public?: boolean; setup?: boolean } }),
+);
 await app.register(fastifyCookie);
 app.addHook("onRequest", guard);
 app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
@@ -72,7 +117,13 @@ const monitorChoice = (v: unknown) => (["season", "all", "future", "none"] as co
  * The TVDB season for a show matched by hand: one past its earlier season's when that maps to the same series. A split
  * cour ("Part 2", "2nd cour") is filed by TVDB under the same season as its first half.
  */
-async function guessSeason(m: { title: { english: string | null; romaji: string | null }; relations?: { edges: { relationType: string; node: { id: number } }[] } | null }, tvdbId: number) {
+async function guessSeason(
+  m: {
+    title: { english: string | null; romaji: string | null };
+    relations?: { edges: { relationType: string; node: { id: number } }[] } | null;
+  },
+  tvdbId: number,
+) {
   const splitCour = /part\s*(2|ii)|2nd cour|cour 2/i.test(`${m.title.english} ${m.title.romaji}`);
   // Walk back through recap specials/OVAs (TVDB season 0) to the last real season, like the picks do.
   let ids = (m.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id);
@@ -82,26 +133,35 @@ async function guessSeason(m: { title: { english: string | null; romaji: string 
       const pm = await mapAnilist(pid);
       if (pm?.tvdbId === tvdbId && pm.season) return splitCour ? pm.season : pm.season + 1;
       const [pmedia] = await getMediaByIds([pid]);
-      if (pmedia && pmedia.format !== "TV" && pmedia.format !== "ONA") next.push(...(pmedia.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id));
+      if (pmedia && pmedia.format !== "TV" && pmedia.format !== "ONA")
+        next.push(...(pmedia.relations?.edges ?? []).filter((e) => e.relationType === "PREQUEL").map((e) => e.node.id));
     }
     ids = next;
   }
   return null;
 }
 
-
 /** A stored secret is only re-used for the URL it was saved with, so it can't be sent somewhere new. */
 function withSecret(url: unknown, secret: unknown, storedUrl: string, storedSecret: string) {
-  const u = checkOutbound(String(url ?? "").trim().replace(/\/+$/, ""));
+  const u = checkOutbound(
+    String(url ?? "")
+      .trim()
+      .replace(/\/+$/, ""),
+  );
   const s = String(secret ?? "");
   if (s && !isMasked(s)) return { url: u, secret: s };
   if (u === storedUrl && storedSecret) return { url: u, secret: storedSecret };
   throw fail("Enter the API key/token again for a new address");
 }
 
-
 function sessionCookie(req: FastifyRequest, reply: FastifyReply, username: string) {
-  reply.setCookie(COOKIE, makeSession(username), { path: "/", httpOnly: true, sameSite: "strict", secure: req.protocol === "https", maxAge: 30 * 86400 });
+  reply.setCookie(COOKIE, makeSession(username), {
+    path: "/",
+    httpOnly: true,
+    sameSite: "strict",
+    secure: req.protocol === "https",
+    maxAge: 30 * 86400,
+  });
 }
 
 // ---------------------------------------------------------------- status & account
@@ -126,7 +186,12 @@ app.get("/api/status", { config: { setup: true } }, async (req) => {
     mode: s.mode,
     profileBuiltAt: storedProfile()?.builtAt ?? null,
     building: isBuilding(),
-    prefs: { hideInLibrary: s.filters.hideInLibrary, hideShorts: s.filters.hideShorts, services: s.display.services, dropAction: s.sonarr.dropAction },
+    prefs: {
+      hideInLibrary: s.filters.hideInLibrary,
+      hideShorts: s.filters.hideShorts,
+      services: s.display.services,
+      dropAction: s.sonarr.dropAction,
+    },
     warnings: warnings(),
     season: seasonOf(),
   };
@@ -138,36 +203,48 @@ let proxySeen = false;
 const webhookSeen: Record<string, number> = {};
 function warnings() {
   const out: string[] = [];
-  if (legacyWebhookAt) out.push("Sonarr is still using the old webhook address, which has a key in the URL. Copy the new one from Settings → Alerts into Sonarr's Connect → Webhook.");
-  if (proxySeen) out.push("If you use a reverse proxy, set the TRUST_PROXY variable to your proxy's IP address (not a hop count) so login protection sees real client addresses.");
+  if (legacyWebhookAt)
+    out.push(
+      "Sonarr is still using the old webhook address, which has a key in the URL. Copy the new one from Settings → Alerts into Sonarr's Connect → Webhook.",
+    );
+  if (proxySeen)
+    out.push(
+      "If you use a reverse proxy, set the TRUST_PROXY variable to your proxy's IP address (not a hop count) so login protection sees real client addresses.",
+    );
   return out;
 }
 
 let settingUp = false;
-app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; setupToken?: string } }>("/api/auth/setup", { config: { setup: true } }, async (req, reply) => {
-  if (getSettings().auth.passwordHash || settingUp) throw fail("Account already exists", 409);
-  if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
-  // A fresh install can only be claimed from the local network, or with the token printed in the container log.
-  const local = isLocalRequest(req) && hostAllowed(req);
-  if (!local && !safeEqual(String(req.body?.setupToken ?? ""), SETUP_TOKEN)) throw fail("Open Tastearr from your home network to create the account, or enter the setup code from the container log", 403);
-  const username = String(req.body?.username ?? "").trim();
-  const password = String(req.body?.password ?? "");
-  if (!username || password.length < 8) throw fail("Choose a username and a password of at least 8 characters");
-  settingUp = true;
-  try {
-    await setAccount(username, password);
-    patchSettings((s) => ({ ...s, auth: { ...s.auth, bypassLocal: req.body?.bypassLocal === true } }));
-  } finally {
-    settingUp = false;
-  }
-  sessionCookie(req, reply, username);
-  return { ok: true };
-});
+app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; setupToken?: string } }>(
+  "/api/auth/setup",
+  { config: { setup: true } },
+  async (req, reply) => {
+    if (getSettings().auth.passwordHash || settingUp) throw fail("Account already exists", 409);
+    if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
+    // A fresh install can only be claimed from the local network, or with the token printed in the container log.
+    const local = isLocalRequest(req) && hostAllowed(req);
+    if (!local && !safeEqual(String(req.body?.setupToken ?? ""), SETUP_TOKEN))
+      throw fail("Open Tastearr from your home network to create the account, or enter the setup code from the container log", 403);
+    const username = String(req.body?.username ?? "").trim();
+    const password = String(req.body?.password ?? "");
+    if (!username || password.length < 8) throw fail("Choose a username and a password of at least 8 characters");
+    settingUp = true;
+    try {
+      await setAccount(username, password);
+      patchSettings((s) => ({ ...s, auth: { ...s.auth, bypassLocal: req.body?.bypassLocal === true } }));
+    } finally {
+      settingUp = false;
+    }
+    sessionCookie(req, reply, username);
+    return { ok: true };
+  },
+);
 
 app.post<{ Body: { username?: string; password?: string } }>("/api/auth/login", { config: { setup: true } }, async (req, reply) => {
   if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
   // Only a real proxy (a LAN peer adding the header) counts; a forged header from outside can't raise the banner.
-  if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) && isPrivateIp(req.socket.remoteAddress ?? "")) proxySeen = true;
+  if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) && isPrivateIp(req.socket.remoteAddress ?? ""))
+    proxySeen = true;
   if (!loginAllowed(req.ip, String(req.body?.username ?? ""))) throw fail("Too many attempts, wait a few seconds and try again", 429);
   const a = getSettings().auth;
   const okUser = safeEqual(String(req.body?.username ?? ""), a.username);
@@ -230,12 +307,19 @@ app.post<{ Params: { which: string } }>("/api/settings/keys/:which/regenerate", 
 app.post<{ Body: { name?: string; url?: string; apiKey?: string } }>("/api/sonarr/extra", async (req) => {
   const s = getSettings();
   if (s.sonarrExtra.length >= 4) throw fail("Up to four extra Sonarr instances");
-  const url = checkOutbound(String(req.body?.url ?? "").trim().replace(/\/+$/, ""));
+  const url = checkOutbound(
+    String(req.body?.url ?? "")
+      .trim()
+      .replace(/\/+$/, ""),
+  );
   const apiKey = String(req.body?.apiKey ?? "").trim();
   if (!apiKey || isMasked(apiKey)) throw fail("Paste that Sonarr's API key");
   if (url === s.sonarr.url || s.sonarrExtra.some((x) => x.url === url)) throw fail("That Sonarr is already connected");
   const v = await testSonarr({ url, apiKey });
-  const name = String(req.body?.name ?? "").trim().slice(0, 40) || new URL(url).host;
+  const name =
+    String(req.body?.name ?? "")
+      .trim()
+      .slice(0, 40) || new URL(url).host;
   patchSettings((x) => ({ ...x, sonarrExtra: [...x.sonarrExtra, { name, url, apiKey }] }));
   forgetSeries();
   invalidateContext();
@@ -356,25 +440,52 @@ app.get("/api/system/health", async () => {
     }
   };
   await Promise.all([
-    probe("Sonarr", !!(s.sonarr.url && s.sonarr.apiKey), () => testSonarr(s.sonarr), "Check the address and API key in Settings → Connections."),
+    probe(
+      "Sonarr",
+      !!(s.sonarr.url && s.sonarr.apiKey),
+      () => testSonarr(s.sonarr),
+      "Check the address and API key in Settings → Connections.",
+    ),
     ...s.sonarrExtra.map((x) => probe(`Sonarr (${x.name})`, true, () => testSonarr(x), "Check it in Settings → Connections.")),
-    probe("Radarr", !!(s.radarr.url && s.radarr.apiKey), () => testRadarr(s.radarr), "Check the address and API key in Settings → Connections."),
-    probe(s.media.type === "plex" ? "Plex" : "Jellyfin", s.media.type !== "none" && !!s.media.url, () => testMediaServer(s.media), "Sign in again in Settings → Connections."),
+    probe(
+      "Radarr",
+      !!(s.radarr.url && s.radarr.apiKey),
+      () => testRadarr(s.radarr),
+      "Check the address and API key in Settings → Connections.",
+    ),
+    probe(
+      s.media.type === "plex" ? "Plex" : "Jellyfin",
+      s.media.type !== "none" && !!s.media.url,
+      () => testMediaServer(s.media),
+      "Sign in again in Settings → Connections.",
+    ),
   ]);
   const age = mappingFileAge();
   const fresh = age !== null && age < 14 * 86_400_000;
   checks.push({
     name: "Anime ID list",
     ok: fresh,
-    detail: age === null ? "Not downloaded yet; it's fetched from GitHub on the first picks load." : fresh ? `Updated ${Math.round(age / 86_400_000)} days ago` : "Couldn't refresh from GitHub for over two weeks; new shows may lack Sonarr matches.",
+    detail:
+      age === null
+        ? "Not downloaded yet; it's fetched from GitHub on the first picks load."
+        : fresh
+          ? `Updated ${Math.round(age / 86_400_000)} days ago`
+          : "Couldn't refresh from GitHub for over two weeks; new shows may lack Sonarr matches.",
   });
-  for (const j of listJobs()) if (j.state === "error") checks.push({ name: `Background job: ${j.name}`, ok: false, detail: String(j.detail ?? "") });
+  for (const j of listJobs())
+    if (j.state === "error") checks.push({ name: `Background job: ${j.name}`, ok: false, detail: String(j.detail ?? "") });
   for (const w of warnings()) checks.push({ name: "Setup", ok: false, detail: w });
   for (const app of ["sonarr", "radarr"] as const) {
     if (!(s[app].url && s[app].apiKey)) continue;
     const at = webhookSeen[app];
     const name = `${app === "sonarr" ? "Sonarr" : "Radarr"} webhook`;
-    if (!at) checks.push({ name, ok: true, detail: "Not heard from since Tastearr started. That's normal until something downloads; if alerts never arrive, add the webhook from Settings → Alerts." });
+    if (!at)
+      checks.push({
+        name,
+        ok: true,
+        detail:
+          "Not heard from since Tastearr started. That's normal until something downloads; if alerts never arrive, add the webhook from Settings → Alerts.",
+      });
     else checks.push({ name, ok: true, detail: `Last heard from ${Math.round((Date.now() - at) / 3_600_000)} hours ago` });
   }
   return { checks };
@@ -398,7 +509,10 @@ app.post<{ Body: { password?: string } }>("/api/system/backup", async (req, repl
   const data = fs.createReadStream(tmp);
   data.on("close", () => fs.rmSync(tmp, { force: true }));
   const stamp = new Date().toISOString().slice(0, 10);
-  return reply.header("Content-Type", "application/octet-stream").header("Content-Disposition", `attachment; filename="tastearr-backup-${stamp}.db"`).send(data);
+  return reply
+    .header("Content-Type", "application/octet-stream")
+    .header("Content-Disposition", `attachment; filename="tastearr-backup-${stamp}.db"`)
+    .send(data);
 });
 
 /** Forgets matches picked by hand; the community list applies again. */
@@ -429,18 +543,33 @@ app.get<{ Params: { id: string }; Querystring: { tvdbId?: string; season?: strin
     const imdb = t.imdbByAnilist.get(anilistId);
     if (!tmdb && !imdb) throw fail("This movie isn't matched to TMDB or IMDb yet, so Radarr can't find it", 422);
     const r = getSettings().radarr;
-    return { app: "radarr", title: m.title.english || m.title.romaji, rootFolder: r.rootFolderPath, search: r.searchOnAdd, minimumAvailability: r.minimumAvailability };
+    return {
+      app: "radarr",
+      title: m.title.english || m.title.romaji,
+      rootFolder: r.rootFolderPath,
+      search: r.searchOnAdd,
+      minimumAvailability: r.minimumAvailability,
+    };
   }
   // A candidate picked from Sonarr's title search: preview it with the season guessed from its earlier season.
   if (req.query.tvdbId) {
     const tvdbId = id(req.query.tvdbId);
     const season = req.query.season ? id(req.query.season) : await guessSeason(m, tvdbId);
     const owned = (await sonarrSeries()).some((x) => x.tvdbId === tvdbId);
-    return { app: "sonarr", ...(await planAdd(tvdbId, season)), alreadyInLibrary: owned, resumesSeries: (await seriesMonitored(tvdbId)) === false };
+    return {
+      app: "sonarr",
+      ...(await planAdd(tvdbId, season)),
+      alreadyInLibrary: owned,
+      resumesSeries: (await seriesMonitored(tvdbId)) === false,
+    };
   }
   const map = await mapAnilist(anilistId);
   if (!map) return { app: "sonarr", needsMatch: true };
-  return { app: "sonarr", ...(await planAdd(map.tvdbId, map.season, await firstOfMany(map))), resumesSeries: (await seriesMonitored(map.tvdbId)) === false };
+  return {
+    app: "sonarr",
+    ...(await planAdd(map.tvdbId, map.season, await firstOfMany(map))),
+    resumesSeries: (await seriesMonitored(map.tvdbId)) === false,
+  };
 });
 
 /** Sonarr title-search candidates when the community mapping has no TVDB match yet. */
@@ -450,43 +579,59 @@ app.get<{ Params: { id: string } }>("/api/picks/:id/candidates", async (req) => 
   return lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
 });
 
-app.post<{ Params: { id: string }; Body: { monitor?: string; search?: boolean; tvdbId?: number; season?: number | null } }>("/api/picks/:id/add", async (req) => {
-  const anilistId = id(req.params.id);
-  const [m] = await getMediaByIds([anilistId]);
-  if (!m) throw fail("Unknown show", 404);
-  let r;
-  if (m.format === "MOVIE") {
-    const t = await mappingTables();
-    r = await addMovie({ tmdbId: t.movieByAnilist.get(anilistId), imdbId: t.imdbByAnilist.get(anilistId) });
-  } else if (req.body?.tvdbId) {
-    // A match picked from Sonarr's title search. Only results of that search are accepted, and the match is
-    // remembered only once Sonarr took it, so a failed add can't leave a wrong match behind.
-    const tvdbId = id(String(req.body.tvdbId));
-    const current = await mapAnilist(anilistId);
-    const cands = current?.tvdbId === tvdbId ? [] : await lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
-    if (current?.tvdbId !== tvdbId && !cands.some((c) => c.tvdbId === tvdbId)) throw fail("That isn't one of Sonarr's matches for this show", 422);
-    const asked = Number(req.body.season);
-    const season = Number.isInteger(asked) && asked >= 1 && asked <= 100 ? asked : await guessSeason(m, tvdbId);
-    const owned = (await sonarrSeries(true)).some((x) => x.tvdbId === tvdbId);
-    // Never remember "this show is that series, season unknown" for something already in Sonarr: it would hide the
-    // "get the new season" choice for good. Ask for the season instead.
-    if (owned && !season) throw fail("This series is already in Sonarr. Choose which season this is.", 422);
-    if (owned) r = await monitorSeason(tvdbId, season!);
-    else r = await addSeries(tvdbId, season, { monitor: monitorChoice(req.body.monitor), search: typeof req.body.search === "boolean" ? req.body.search : undefined });
-    await saveOverride(anilistId, tvdbId, season);
-  } else {
-    const map = await mapAnilist(anilistId);
-    if (!map) throw fail("Pick the matching show first", 422);
-    const owned = (await sonarrSeries()).some((x) => x.tvdbId === map.tvdbId);
-    if (owned) {
-      if (!map.season) throw fail("This show is already in Sonarr", 409);
-      r = await monitorSeason(map.tvdbId, map.season);
-    } else r = await addSeries(map.tvdbId, map.season, { monitor: monitorChoice(req.body?.monitor), search: typeof req.body?.search === "boolean" ? req.body.search : undefined, firstOfMany: await firstOfMany(map) });
-  }
-  setFeedback(anilistId, "added");
-  invalidateContext();
-  return r;
-});
+app.post<{ Params: { id: string }; Body: { monitor?: string; search?: boolean; tvdbId?: number; season?: number | null } }>(
+  "/api/picks/:id/add",
+  async (req) => {
+    const anilistId = id(req.params.id);
+    const [m] = await getMediaByIds([anilistId]);
+    if (!m) throw fail("Unknown show", 404);
+    let r;
+    if (m.format === "MOVIE") {
+      const t = await mappingTables();
+      r = await addMovie({ tmdbId: t.movieByAnilist.get(anilistId), imdbId: t.imdbByAnilist.get(anilistId) });
+    } else if (req.body?.tvdbId) {
+      // A match picked from Sonarr's title search. Only results of that search are accepted, and the match is
+      // remembered only once Sonarr took it, so a failed add can't leave a wrong match behind.
+      const tvdbId = id(String(req.body.tvdbId));
+      const current = await mapAnilist(anilistId);
+      const cands =
+        current?.tvdbId === tvdbId
+          ? []
+          : await lookupByTitle([m.title.english ?? "", m.title.romaji ?? ""], m.startDate?.year ?? m.seasonYear ?? null);
+      if (current?.tvdbId !== tvdbId && !cands.some((c) => c.tvdbId === tvdbId))
+        throw fail("That isn't one of Sonarr's matches for this show", 422);
+      const asked = Number(req.body.season);
+      const season = Number.isInteger(asked) && asked >= 1 && asked <= 100 ? asked : await guessSeason(m, tvdbId);
+      const owned = (await sonarrSeries(true)).some((x) => x.tvdbId === tvdbId);
+      // Never remember "this show is that series, season unknown" for something already in Sonarr: it would hide the
+      // "get the new season" choice for good. Ask for the season instead.
+      if (owned && !season) throw fail("This series is already in Sonarr. Choose which season this is.", 422);
+      if (owned) r = await monitorSeason(tvdbId, season!);
+      else
+        r = await addSeries(tvdbId, season, {
+          monitor: monitorChoice(req.body.monitor),
+          search: typeof req.body.search === "boolean" ? req.body.search : undefined,
+        });
+      await saveOverride(anilistId, tvdbId, season);
+    } else {
+      const map = await mapAnilist(anilistId);
+      if (!map) throw fail("Pick the matching show first", 422);
+      const owned = (await sonarrSeries()).some((x) => x.tvdbId === map.tvdbId);
+      if (owned) {
+        if (!map.season) throw fail("This show is already in Sonarr", 409);
+        r = await monitorSeason(map.tvdbId, map.season);
+      } else
+        r = await addSeries(map.tvdbId, map.season, {
+          monitor: monitorChoice(req.body?.monitor),
+          search: typeof req.body?.search === "boolean" ? req.body.search : undefined,
+          firstOfMany: await firstOfMany(map),
+        });
+    }
+    setFeedback(anilistId, "added");
+    invalidateContext();
+    return r;
+  },
+);
 app.post<{ Params: { id: string }; Body: { search?: boolean } }>("/api/picks/:id/monitor", async (req) => {
   const anilistId = id(req.params.id);
   const map = await mapAnilist(anilistId);
@@ -510,7 +655,15 @@ app.get("/api/autoadd/preview", async () => {
   const cur = seasonOf();
   const out = [];
   for (const { season, year } of [cur, shiftSeason(cur, 1)])
-    for (const p of await autoAddCandidates(season, year)) out.push({ id: p.id, title: p.title, match: p.match, season, year, action: p.section === "movies" ? "Radarr" : p.autoAction === "monitor" ? `Sonarr, season ${p.tvdbSeason}` : "Sonarr" });
+    for (const p of await autoAddCandidates(season, year))
+      out.push({
+        id: p.id,
+        title: p.title,
+        match: p.match,
+        season,
+        year,
+        action: p.section === "movies" ? "Radarr" : p.autoAction === "monitor" ? `Sonarr, season ${p.tvdbSeason}` : "Sonarr",
+      });
   return { enabled: getSettings().autoAdd.enabled, picks: out };
 });
 app.get("/api/autoadd/history", async () => autoAddHistory());
@@ -531,9 +684,17 @@ app.post<{ Params: { id: string } }>("/api/picks/:id/unfollow", async (req) => u
 app.get("/api/quiz", async () => getQuiz());
 /** "Add a show you've seen" in the quiz. */
 app.get<{ Querystring: { q?: string } }>("/api/quiz/search", async (req) => {
-  const q = String(req.query.q ?? "").trim().slice(0, 80);
+  const q = String(req.query.q ?? "")
+    .trim()
+    .slice(0, 80);
   if (q.length < 2) return [];
-  return (await searchTitle(q)).map((m) => ({ id: m.id, title: title(m), cover: m.coverImage.large, year: m.seasonYear ?? m.startDate?.year ?? null, format: m.format }));
+  return (await searchTitle(q)).map((m) => ({
+    id: m.id,
+    title: title(m),
+    cover: m.coverImage.large,
+    year: m.seasonYear ?? m.startDate?.year ?? null,
+    format: m.format,
+  }));
 });
 app.put<{ Body: { noGore?: boolean } }>("/api/quiz/content", async (req) => {
   patchSettings((s) => ({ ...s, filters: { ...s.filters, noGore: req.body?.noGore === true } }));
@@ -594,9 +755,11 @@ app.post<{ Params: { key: string } }>("/api/webhook/radarr/:key", { config: { pu
  * List" reads [{ tvdbId }]; Radarr's "Custom List" reads [{ id }] (TMDB). Lists shows given 👍 or ♥ on the Picks page.
  */
 const wanted = () =>
-  (db.prepare("SELECT anilist_id FROM feedback WHERE source = 'picks' AND verdict IN ('liked', 'loved') AND at > ?").all(Date.now() - 120 * 86_400_000) as { anilist_id: number }[]).map(
-    (r) => r.anilist_id,
-  );
+  (
+    db
+      .prepare("SELECT anilist_id FROM feedback WHERE source = 'picks' AND verdict IN ('liked', 'loved') AND at > ?")
+      .all(Date.now() - 120 * 86_400_000) as { anilist_id: number }[]
+  ).map((r) => r.anilist_id);
 const listTitle = (id: number) => {
   const m = cachedMedia(id);
   return m ? title(m) : undefined;
@@ -621,17 +784,23 @@ app.get<{ Params: { key: string } }>("/api/importlist/radarr/:key", { config: { 
   }
   return [...out].map(([id, title]) => ({ id, title }));
 });
-app.post<{ Params: { tvdbId: string }; Querystring: { exp?: string; sig?: string } }>("/api/actions/drop/:tvdbId", { config: { public: true } }, async (req) => {
-  const tvdbId = id(req.params.tvdbId);
-  if (!verifyAction("drop", tvdbId, Number(req.query.exp), String(req.query.sig ?? ""))) throw fail("This link has expired", 401);
-  const r = await dropShow(tvdbId);
-  invalidateContext();
-  return { ok: true, message: `Dropped ${r.title}. You won't get alerts for it any more.` };
-});
+app.post<{ Params: { tvdbId: string }; Querystring: { exp?: string; sig?: string } }>(
+  "/api/actions/drop/:tvdbId",
+  { config: { public: true } },
+  async (req) => {
+    const tvdbId = id(req.params.tvdbId);
+    if (!verifyAction("drop", tvdbId, Number(req.query.exp), String(req.query.sig ?? ""))) throw fail("This link has expired", 401);
+    const r = await dropShow(tvdbId);
+    invalidateContext();
+    return { ok: true, message: `Dropped ${r.title}. You won't get alerts for it any more.` };
+  },
+);
 
 // ---------------------------------------------------------------- web UI
 
 if (fs.existsSync(WEB_DIR)) {
   await app.register(fastifyStatic, { root: WEB_DIR, wildcard: false });
-  app.setNotFoundHandler((req, reply) => (req.url.startsWith("/api/") ? reply.code(404).send({ error: "Not found" }) : reply.sendFile("index.html")));
+  app.setNotFoundHandler((req, reply) =>
+    req.url.startsWith("/api/") ? reply.code(404).send({ error: "Not found" }) : reply.sendFile("index.html"),
+  );
 }

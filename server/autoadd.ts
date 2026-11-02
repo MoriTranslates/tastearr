@@ -25,7 +25,8 @@ export async function firstOfMany(map: { tvdbId: number; season: number | null }
 }
 
 const doneIds = () => new Set((db.prepare("SELECT anilist_id FROM auto_added").all() as { anilist_id: number }[]).map((r) => r.anilist_id));
-const doneThisSeason = (season: Season, year: number) => (db.prepare("SELECT COUNT(*) AS n FROM auto_added WHERE season = ? AND year = ?").get(season, year) as { n: number }).n;
+const doneThisSeason = (season: Season, year: number) =>
+  (db.prepare("SELECT COUNT(*) AS n FROM auto_added WHERE season = ? AND year = ?").get(season, year) as { n: number }).n;
 
 /** What auto-add would do for a season, best first, already capped. Read-only. */
 export async function autoAddCandidates(season: Season, year: number): Promise<(Pick & { autoAction: "add" | "monitor" })[]> {
@@ -39,7 +40,8 @@ export async function autoAddCandidates(season: Season, year: number): Promise<(
     if (p.match < cfg.minMatch || p.excluded || p.lowConfidence || done.has(p.id)) continue;
     // A 👍 is fine; any other verdict (added by hand, 👎, hidden) or own status (watching, seen, dropped, following) means hands off.
     if ((p.verdict && p.verdict !== "liked") || p.myStatus) continue;
-    const wanted = p.section === "new" ? cfg.newShows : p.section === "continuing" ? cfg.sequels : p.section === "movies" ? cfg.movies : false;
+    const wanted =
+      p.section === "new" ? cfg.newShows : p.section === "continuing" ? cfg.sequels : p.section === "movies" ? cfg.movies : false;
     if (!wanted) continue;
     if (p.section === "movies") {
       if (p.addVia === "radarr" && !p.inLibrary && radarrConfigured()) out.push({ ...p, autoAction: "add" });
@@ -74,10 +76,15 @@ export async function runAutoAdd() {
             const r = await monitorSeason(p.tvdbId!, p.tvdbSeason!, s.autoAdd.search);
             detail = `Sonarr, season ${r.season}${r.waitingForSeason ? " (when TVDB lists it)" : ""}`;
           } else {
-            const r = await addSeries(p.tvdbId!, p.tvdbSeason, { search: s.autoAdd.search, firstOfMany: await firstOfMany({ tvdbId: p.tvdbId!, season: p.tvdbSeason }) });
+            const r = await addSeries(p.tvdbId!, p.tvdbSeason, {
+              search: s.autoAdd.search,
+              firstOfMany: await firstOfMany({ tvdbId: p.tvdbId!, season: p.tvdbSeason }),
+            });
             detail = `Sonarr, ${r.monitored.toLowerCase()}`;
           }
-          db.prepare("INSERT OR IGNORE INTO auto_added (anilist_id, title, season, year, match, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(p.id, p.title, season, year, p.match, detail, Date.now());
+          db.prepare(
+            "INSERT OR IGNORE INTO auto_added (anilist_id, title, season, year, match, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          ).run(p.id, p.title, season, year, p.match, detail, Date.now());
           setFeedback(p.id, "added", "auto");
           added.push({ title: `${p.title} (${p.match}%)`, detail });
         } catch (e) {

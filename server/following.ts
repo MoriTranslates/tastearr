@@ -19,7 +19,9 @@ export async function follow(id: number) {
   if (!m) throw Object.assign(new Error("Unknown show"), { statusCode: 404 });
   db.prepare("INSERT INTO following (anilist_id, title, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING").run(id, title(m), Date.now());
   // Don't announce episodes that aired before following.
-  if (m.nextAiringEpisode) for (let ep = 1; ep < m.nextAiringEpisode.episode; ep++) db.prepare("INSERT OR IGNORE INTO aired_notified (anilist_id, episode) VALUES (?, ?)").run(id, ep);
+  if (m.nextAiringEpisode)
+    for (let ep = 1; ep < m.nextAiringEpisode.episode; ep++)
+      db.prepare("INSERT OR IGNORE INTO aired_notified (anilist_id, episode) VALUES (?, ?)").run(id, ep);
   setFeedback(id, "added");
   return { id, following: true };
 }
@@ -62,7 +64,11 @@ export async function announceAired() {
   for (const a of fresh) {
     const m = media.get(a.mediaId);
     if (!m) continue;
-    const where = [...new Set((m.externalLinks ?? []).filter((l) => l.type === "STREAMING").map((l) => l.site.replace(/^Amazon Prime Video$/, "Prime Video")))];
+    const where = [
+      ...new Set(
+        (m.externalLinks ?? []).filter((l) => l.type === "STREAMING").map((l) => l.site.replace(/^Amazon Prime Video$/, "Prime Video")),
+      ),
+    ];
     const firstUrl = (m.externalLinks ?? []).find((l) => l.type === "STREAMING")?.url;
     try {
       const sent = await send({

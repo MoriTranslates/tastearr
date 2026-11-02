@@ -1,7 +1,14 @@
 import { checkOutbound } from "./outbound.js";
 import { getSettings, type Settings } from "./settings.js";
 
-export interface RadarrMovie { id: number; tmdbId: number; title: string; hasFile: boolean; monitored: boolean; [k: string]: unknown }
+export interface RadarrMovie {
+  id: number;
+  tmdbId: number;
+  title: string;
+  hasFile: boolean;
+  monitored: boolean;
+  [k: string]: unknown;
+}
 
 type Conn = Pick<Settings["radarr"], "url" | "apiKey">;
 

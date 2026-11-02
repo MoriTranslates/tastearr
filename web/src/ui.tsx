@@ -2,7 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 
 // ---------------------------------------------------------------- toasts
 
-interface Toast { id: number; msg: string; error: boolean; action?: { label: string; run: () => void } }
+interface Toast {
+  id: number;
+  msg: string;
+  error: boolean;
+  action?: { label: string; run: () => void };
+}
 type Push = (msg: string, error?: boolean, action?: Toast["action"]) => void;
 const ToastCtx = createContext<Push>(() => undefined);
 export const useToast = () => useContext(ToastCtx);
@@ -21,7 +26,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {/* Permanent live regions (screen readers ignore regions created on the fly): errors assertive, the rest polite. */}
       <div className="sr-only" role="alert">
-        {toasts.filter((t) => t.error).map((t) => t.msg).join(". ")}
+        {toasts
+          .filter((t) => t.error)
+          .map((t) => t.msg)
+          .join(". ")}
       </div>
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
@@ -107,11 +115,31 @@ export function ErrorBox({ error, retry }: { error: string; retry: () => void })
 // ---------------------------------------------------------------- inputs
 
 /** Password-style field for secrets, with a show/hide toggle. */
-export function SecretInput({ value, onChange, placeholder, label, readOnly }: { value: string; onChange: (v: string) => void; placeholder?: string; label: string; readOnly?: boolean }) {
+export function SecretInput({
+  value,
+  onChange,
+  placeholder,
+  label,
+  readOnly,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  label: string;
+  readOnly?: boolean;
+}) {
   const [show, setShow] = useState(false);
   return (
     <span className="secret">
-      <input type={show ? "text" : "password"} value={value} placeholder={placeholder} aria-label={label} autoComplete="off" readOnly={readOnly} onChange={(e) => onChange(e.target.value)} />
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        placeholder={placeholder}
+        aria-label={label}
+        autoComplete="off"
+        readOnly={readOnly}
+        onChange={(e) => onChange(e.target.value)}
+      />
       <button type="button" className="ghost small" onClick={() => setShow(!show)} aria-label={show ? `Hide ${label}` : `Show ${label}`}>
         {show ? "Hide" : "Show"}
       </button>
@@ -120,7 +148,17 @@ export function SecretInput({ value, onChange, placeholder, label, readOnly }: {
 }
 
 /** Comma-separated list input that keeps what you type and only splits when you leave the field. */
-export function ListInput({ value, onChange, placeholder, label }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string; label: string }) {
+export function ListInput({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+  label: string;
+}) {
   const [text, setText] = useState(value.join(", "));
   const last = useRef(value.join(", "));
   useEffect(() => {
@@ -129,7 +167,10 @@ export function ListInput({ value, onChange, placeholder, label }: { value: stri
     last.current = v;
   }, [value]);
   const commit = () => {
-    const list = text.split(",").map((x) => x.trim()).filter(Boolean);
+    const list = text
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
     last.current = list.join(", ");
     onChange(list);
   };
@@ -137,7 +178,19 @@ export function ListInput({ value, onChange, placeholder, label }: { value: stri
 }
 
 /** Number input that allows clearing while typing and clamps when you leave the field. */
-export function NumberInput({ value, onChange, min, max, label }: { value: number; onChange: (v: number) => void; min: number; max: number; label: string }) {
+export function NumberInput({
+  value,
+  onChange,
+  min,
+  max,
+  label,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  label: string;
+}) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
   return (
@@ -159,13 +212,29 @@ export function NumberInput({ value, onChange, min, max, label }: { value: numbe
 }
 
 /** Toggleable chips for picking several options (works on phones, unlike <select multiple>). */
-export function Chips<T extends string | number>({ options, value, onChange, label }: { options: { id: T; label: string }[]; value: T[]; onChange: (v: T[]) => void; label: string }) {
+export function Chips<T extends string | number>({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: { id: T; label: string }[];
+  value: T[];
+  onChange: (v: T[]) => void;
+  label: string;
+}) {
   return (
     <div className="chips pickable" role="group" aria-label={label}>
       {options.map((o) => {
         const on = value.includes(o.id);
         return (
-          <button type="button" key={String(o.id)} className={`chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== o.id) : [...value, o.id])}>
+          <button
+            type="button"
+            key={String(o.id)}
+            className={`chip${on ? " on" : ""}`}
+            aria-pressed={on}
+            onClick={() => onChange(on ? value.filter((x) => x !== o.id) : [...value, o.id])}
+          >
             {on ? "✓ " : ""}
             {o.label}
           </button>
@@ -206,7 +275,10 @@ export function relTime(ms: number) {
 export function dayDiff(ms: number) {
   const a = new Date();
   const b = new Date(ms);
-  return Math.round((new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime() - new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime()) / 86_400_000);
+  return Math.round(
+    (new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime() - new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime()) /
+      86_400_000,
+  );
 }
 
 export function airLabel(ms: number) {
@@ -222,5 +294,8 @@ export function airLabel(ms: number) {
 export function dateLabel(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   if (!m) return String(y);
-  return new Date(y, m - 1, d || 1).toLocaleDateString(undefined, d ? { month: "short", day: "numeric", year: "numeric" } : { month: "long", year: "numeric" });
+  return new Date(y, m - 1, d || 1).toLocaleDateString(
+    undefined,
+    d ? { month: "short", day: "numeric", year: "numeric" } : { month: "long", year: "numeric" },
+  );
 }

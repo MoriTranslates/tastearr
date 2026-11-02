@@ -16,7 +16,9 @@ export function Settings({ status, onSaved }: { status: Status; onSaved: () => v
   usePageTitle("Settings");
   const { s, setS, save, error } = useSettings();
   // Streaming-only users start on Picks & filters; server users on Connections. A tab they pick is remembered.
-  const [tab, setTabRaw] = useState<Tab>(() => store.get<Tab | null>("settingsTab", null) ?? (status.mode === "stream" ? "picks" : "connections"));
+  const [tab, setTabRaw] = useState<Tab>(
+    () => store.get<Tab | null>("settingsTab", null) ?? (status.mode === "stream" ? "picks" : "connections"),
+  );
   const setTab = (t: Tab) => (setTabRaw(t), store.set("settingsTab", t));
 
   // Decided once per visit, so saving Sonarr inside the folded section doesn't reshuffle the page.
@@ -88,7 +90,23 @@ function ServerCards({ s, setS, save }: { s: S; setS: (s: S) => void; save: (p: 
 }
 
 /** Common legal streaming sites (AniList's names), for "my services". */
-const SERVICES = ["Crunchyroll", "Netflix", "HIDIVE", "Prime Video", "Disney+", "Hulu", "Max", "Bilibili TV", "YouTube", "Muse Asia", "Ani-One Asia", "iQIYI", "Tubi", "Hoopla", "Laftel"];
+const SERVICES = [
+  "Crunchyroll",
+  "Netflix",
+  "HIDIVE",
+  "Prime Video",
+  "Disney+",
+  "Hulu",
+  "Max",
+  "Bilibili TV",
+  "YouTube",
+  "Muse Asia",
+  "Ani-One Asia",
+  "iQIYI",
+  "Tubi",
+  "Hoopla",
+  "Laftel",
+];
 
 function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> }) {
   const toast = useToast();
@@ -120,7 +138,10 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
       <div className="form">
         <label>
           Titles in
-          <select value={display.titleLanguage} onChange={(e) => setDisplay({ ...display, titleLanguage: e.target.value as S["display"]["titleLanguage"] })}>
+          <select
+            value={display.titleLanguage}
+            onChange={(e) => setDisplay({ ...display, titleLanguage: e.target.value as S["display"]["titleLanguage"] })}
+          >
             <option value="english">English</option>
             <option value="romaji">Romaji</option>
             <option value="native">Native (日本語)</option>
@@ -132,7 +153,15 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
             {[...new Set([...SERVICES, ...display.services])].map((sv) => {
               const on = display.services.includes(sv);
               return (
-                <button key={sv} type="button" className={`chip${on ? " on" : ""}`} aria-pressed={on} onClick={() => setDisplay({ ...display, services: on ? display.services.filter((x) => x !== sv) : [...display.services, sv] })}>
+                <button
+                  key={sv}
+                  type="button"
+                  className={`chip${on ? " on" : ""}`}
+                  aria-pressed={on}
+                  onClick={() =>
+                    setDisplay({ ...display, services: on ? display.services.filter((x) => x !== sv) : [...display.services, sv] })
+                  }
+                >
                   {on ? "✓ " : ""}
                   {sv}
                 </button>
@@ -143,24 +172,47 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
         </div>
         <label>
           Never show these genres
-          <ListInput label="Excluded genres" value={filters.excludeGenres} placeholder="Slice of Life, Music" onChange={(v) => setFilters({ ...filters, excludeGenres: v })} />
+          <ListInput
+            label="Excluded genres"
+            value={filters.excludeGenres}
+            placeholder="Slice of Life, Music"
+            onChange={(v) => setFilters({ ...filters, excludeGenres: v })}
+          />
         </label>
         <label>
           Never show these tags
-          <ListInput label="Excluded tags" value={filters.excludeTags} placeholder="Kids, Idol" onChange={(v) => setFilters({ ...filters, excludeTags: v })} />
+          <ListInput
+            label="Excluded tags"
+            value={filters.excludeTags}
+            placeholder="Kids, Idol"
+            onChange={(v) => setFilters({ ...filters, excludeTags: v })}
+          />
         </label>
         <label>
           Seasons to learn from
-          <NumberInput label="Seasons" min={2} max={24} value={training.seasons} onChange={(v) => setTraining({ ...training, seasons: v })} />
+          <NumberInput
+            label="Seasons"
+            min={2}
+            max={24}
+            value={training.seasons}
+            onChange={(v) => setTraining({ ...training, seasons: v })}
+          />
         </label>
         <label className="check">
-          <input type="checkbox" checked={filters.noGore} onChange={(e) => setFilters({ ...filters, noGore: e.target.checked })} /> Hide shows with gore or graphic violence
+          <input type="checkbox" checked={filters.noGore} onChange={(e) => setFilters({ ...filters, noGore: e.target.checked })} /> Hide
+          shows with gore or graphic violence
         </label>
         <label className="check">
-          <input type="checkbox" checked={filters.hideInLibrary} onChange={(e) => setFilters({ ...filters, hideInLibrary: e.target.checked })} /> Hide shows I already have, by default
+          <input
+            type="checkbox"
+            checked={filters.hideInLibrary}
+            onChange={(e) => setFilters({ ...filters, hideInLibrary: e.target.checked })}
+          />{" "}
+          Hide shows I already have, by default
         </label>
         <label className="check">
-          <input type="checkbox" checked={filters.hideShorts} onChange={(e) => setFilters({ ...filters, hideShorts: e.target.checked })} /> Fold away the Shorts section by default
+          <input type="checkbox" checked={filters.hideShorts} onChange={(e) => setFilters({ ...filters, hideShorts: e.target.checked })} />{" "}
+          Fold away the Shorts section by default
         </label>
       </div>
       <p className="muted small">Filters never hide sequels of shows you watch. Your quiz genre answers live on the Quiz page.</p>
@@ -176,8 +228,23 @@ function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> 
   );
 }
 
-interface AutoPick { id: number; title: string; match: number; season: string; year: number; action: string }
-interface AutoDone { id: number; title: string; season: string; year: number; match: number; detail: string; at: number }
+interface AutoPick {
+  id: number;
+  title: string;
+  match: number;
+  season: string;
+  year: number;
+  action: string;
+}
+interface AutoDone {
+  id: number;
+  title: string;
+  season: string;
+  year: number;
+  match: number;
+  detail: string;
+  at: number;
+}
 
 /** Auto-add: like an import list, but driven by match %. Off until the user turns it on. */
 function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> }) {
@@ -187,7 +254,9 @@ function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> })
   const [history, setHistory] = useState<AutoDone[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    api<AutoDone[]>("/autoadd/history").then(setHistory).catch(() => undefined);
+    api<AutoDone[]>("/autoadd/history")
+      .then(setHistory)
+      .catch(() => undefined);
   }, []);
 
   async function submit() {
@@ -232,9 +301,10 @@ function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> })
     <div className="card pad stack">
       <h2>Auto-add</h2>
       <p className="muted small">
-        Sends picks at or above a match % to Sonarr/Radarr by itself, for this season and next, like an import list. It never adds shorts, rough guesses, shows you've
-        hidden, 👎'd, seen or are watching, or shows without a confirmed Sonarr match. Sequels get only their new season, and each show is added at most once (remove it
-        from Sonarr and it stays removed). You get an alert listing what was added.
+        Sends picks at or above a match % to Sonarr/Radarr by itself, for this season and next, like an import list. It never adds shorts,
+        rough guesses, shows you've hidden, 👎'd, seen or are watching, or shows without a confirmed Sonarr match. Sequels get only their
+        new season, and each show is added at most once (remove it from Sonarr and it stays removed). You get an alert listing what was
+        added.
       </p>
       <div className="form">
         <label className="check">
@@ -249,7 +319,8 @@ function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> })
           <NumberInput label="Per season" min={1} max={50} value={a.maxPerSeason} onChange={(v) => setA({ ...a, maxPerSeason: v })} />
         </label>
         <label className="check">
-          <input type="checkbox" checked={a.sequels} onChange={(e) => setA({ ...a, sequels: e.target.checked })} /> New seasons of shows (Continuing)
+          <input type="checkbox" checked={a.sequels} onChange={(e) => setA({ ...a, sequels: e.target.checked })} /> New seasons of shows
+          (Continuing)
         </label>
         <label className="check">
           <input type="checkbox" checked={a.newShows} onChange={(e) => setA({ ...a, newShows: e.target.checked })} /> Brand-new shows
@@ -315,7 +386,9 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
   const [keys, setKeys] = useState<{ apiKey: string | null; webhookKey: string } | null>(null);
 
   useEffect(() => {
-    api<{ apiKey: string | null; webhookKey: string }>("/settings/keys").then(setKeys).catch(() => undefined);
+    api<{ apiKey: string | null; webhookKey: string }>("/settings/keys")
+      .then(setKeys)
+      .catch(() => undefined);
   }, []);
 
   async function saveMode() {
@@ -337,7 +410,12 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
   }
   async function regen(which: "apiKey" | "webhookKey") {
     const what = which === "apiKey" ? "API key" : "webhook key";
-    if (!confirm(`Make a new ${what}? Anything using the old one ${which === "webhookKey" ? "(your Sonarr/Radarr webhooks)" : ""} will stop working until you update it.`)) return;
+    if (
+      !confirm(
+        `Make a new ${what}? Anything using the old one ${which === "webhookKey" ? "(your Sonarr/Radarr webhooks)" : ""} will stop working until you update it.`,
+      )
+    )
+      return;
     try {
       const r = await api<Record<string, string>>(`/settings/keys/${which}/regenerate`, { body: {} });
       setKeys((k) => (k ? { ...k, ...r } : k));
@@ -374,8 +452,9 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
           </label>
         </div>
         <p className="muted small">
-          Same as Sonarr's "Authentication Required: Disabled for Local Addresses". Visits through a reverse proxy or tunnel always need the password unless you set{" "}
-          <code>TRUST_PROXY</code> to your proxy's address. Changing this needs a password login, not the home-network shortcut.
+          Same as Sonarr's "Authentication Required: Disabled for Local Addresses". Visits through a reverse proxy or tunnel always need the
+          password unless you set <code>TRUST_PROXY</code> to your proxy's address. Changing this needs a password login, not the
+          home-network shortcut.
         </p>
         <div className="row end">
           <button className="primary" onClick={saveMode}>
@@ -393,11 +472,21 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
           </label>
           <label>
             New password (leave blank to keep)
-            <input type="password" value={acct.password} autoComplete="new-password" onChange={(e) => setAcct({ ...acct, password: e.target.value })} />
+            <input
+              type="password"
+              value={acct.password}
+              autoComplete="new-password"
+              onChange={(e) => setAcct({ ...acct, password: e.target.value })}
+            />
           </label>
           <label>
             Current password
-            <input type="password" value={acct.currentPassword} autoComplete="current-password" onChange={(e) => setAcct({ ...acct, currentPassword: e.target.value })} />
+            <input
+              type="password"
+              value={acct.currentPassword}
+              autoComplete="current-password"
+              onChange={(e) => setAcct({ ...acct, currentPassword: e.target.value })}
+            />
           </label>
         </div>
         <div className="row end">
@@ -436,8 +525,8 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
         <details>
           <summary>Import lists (let Sonarr/Radarr pull your 👍 picks instead)</summary>
           <p className="muted small">
-            In Sonarr: Settings → Import Lists → + → Custom List, and paste the first address. In Radarr: Settings → Lists → + → Custom List, and paste the second. They list
-            shows you gave 👍 on the Picks page.
+            In Sonarr: Settings → Import Lists → + → Custom List, and paste the first address. In Radarr: Settings → Lists → + → Custom
+            List, and paste the second. They list shows you gave 👍 on the Picks page.
           </p>
           {(["sonarr", "radarr"] as const).map((app) => {
             const url = `${s.externalUrl || location.origin}/api/importlist/${app}/${keys?.webhookKey ?? s.webhookKey}`;
@@ -451,8 +540,8 @@ function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial
             );
           })}
           <p className="muted small">
-            Recommended Sonarr list settings: Series Type <em>Anime</em>, Monitor <em>Last Season</em>, Search on add off, tag <em>tastearr</em>, and leave "Clean Library
-            Level" disabled. Only 👍 from the last 4 months are listed; quiz answers never are.
+            Recommended Sonarr list settings: Series Type <em>Anime</em>, Monitor <em>Last Season</em>, Search on add off, tag{" "}
+            <em>tastearr</em>, and leave "Clean Library Level" disabled. Only 👍 from the last 4 months are listed; quiz answers never are.
           </p>
         </details>
         <div className="row end">

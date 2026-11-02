@@ -12,7 +12,11 @@ import { cachedWatch } from "./taste.js";
 export async function dropShow(tvdbId: number) {
   const s = (await sonarrSeries()).find((x) => x.tvdbId === tvdbId);
   const title = s?.title ?? `TVDB ${tvdbId}`;
-  db.prepare("INSERT INTO dropped (tvdb_id, title, at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET at = excluded.at").run(tvdbId, title, Date.now());
+  db.prepare("INSERT INTO dropped (tvdb_id, title, at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET at = excluded.at").run(
+    tvdbId,
+    title,
+    Date.now(),
+  );
   const unmonitor = !!s && getSettings().sonarr.dropAction === "unmonitor";
   if (unmonitor) await setMonitored(s.id, false, s.instance);
   return { tvdbId, title, dropped: true, monitored: s ? !unmonitor && s.monitored : null };
@@ -42,7 +46,8 @@ export async function myShows() {
     .map((s) => {
       const stats = (s.statistics ?? {}) as { episodeFileCount?: number };
       const w = watch.get(s.tvdbId);
-      const poster = ((s.images ?? []) as { coverType: string; remoteUrl?: string }[]).find((i) => i.coverType === "poster")?.remoteUrl ?? null;
+      const poster =
+        ((s.images ?? []) as { coverType: string; remoteUrl?: string }[]).find((i) => i.coverType === "poster")?.remoteUrl ?? null;
       return {
         tvdbId: s.tvdbId,
         title: s.title,
@@ -65,10 +70,14 @@ interface SonarrWebhook {
   episodes?: { seasonNumber: number; episodeNumber: number; title?: string }[];
 }
 
-const code = (e: { seasonNumber: number; episodeNumber: number }) => `S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`;
+const code = (e: { seasonNumber: number; episodeNumber: number }) =>
+  `S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`;
 
 /** Sonarr sends one webhook per imported file; collect them per series for a minute so a batch drop is one alert. */
-const pending = new Map<number, { series: NonNullable<SonarrWebhook["series"]>; episodes: NonNullable<SonarrWebhook["episodes"]>; timer: NodeJS.Timeout; first: number }>();
+const pending = new Map<
+  number,
+  { series: NonNullable<SonarrWebhook["series"]>; episodes: NonNullable<SonarrWebhook["episodes"]>; timer: NodeJS.Timeout; first: number }
+>();
 const BATCH_MS = 60_000;
 /** A long import backlog still gets its alert within 5 minutes. */
 const MAX_BATCH_MS = 5 * 60_000;
@@ -134,7 +143,12 @@ export async function handleSonarrWebhook(p: SonarrWebhook) {
     cur.episodes.push(...(p.episodes ?? []));
     if (Date.now() - cur.first < MAX_BATCH_MS - BATCH_MS) cur.timer.refresh();
   } else {
-    pending.set(id, { series: p.series, episodes: [...(p.episodes ?? [])], timer: setTimeout(() => void flush(id), BATCH_MS), first: Date.now() });
+    pending.set(id, {
+      series: p.series,
+      episodes: [...(p.episodes ?? [])],
+      timer: setTimeout(() => void flush(id), BATCH_MS),
+      first: Date.now(),
+    });
   }
   return ["queued"];
 }

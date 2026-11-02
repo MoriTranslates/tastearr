@@ -44,7 +44,15 @@ async function refresh() {
       console.warn("Mapping list refresh failed, using cached copy:", (e as Error).message);
     }
   }
-  const rows = JSON.parse(fs.readFileSync(FILE, "utf8")) as { anilist_id?: number; tvdb_id?: number; mal_id?: number; anidb_id?: number; imdb_id?: string[] | string; themoviedb_id?: { movie?: number[] | number; tv?: number }; season?: { tvdb?: number } }[];
+  const rows = JSON.parse(fs.readFileSync(FILE, "utf8")) as {
+    anilist_id?: number;
+    tvdb_id?: number;
+    mal_id?: number;
+    anidb_id?: number;
+    imdb_id?: string[] | string;
+    themoviedb_id?: { movie?: number[] | number; tv?: number };
+    season?: { tvdb?: number };
+  }[];
   byAnilist = new Map();
   byTvdb = new Map();
   byMal = new Map();
@@ -68,7 +76,11 @@ async function refresh() {
     push(byTvdb, r.tvdb_id, r.anilist_id);
   }
   // User-confirmed matches win over the community list.
-  for (const o of db.prepare("SELECT anilist_id, tvdb_id, season FROM mapping_overrides").all() as { anilist_id: number; tvdb_id: number; season: number | null }[])
+  for (const o of db.prepare("SELECT anilist_id, tvdb_id, season FROM mapping_overrides").all() as {
+    anilist_id: number;
+    tvdb_id: number;
+    season: number | null;
+  }[])
     place(o.anilist_id, { tvdbId: o.tvdb_id, season: o.season });
   loadedAt = Date.now();
 }
@@ -76,14 +88,20 @@ async function refresh() {
 /** Points an AniList id at a TVDB series, taking it out of the previous series' list so watch history doesn't mix. */
 function place(anilistId: number, m: Mapping) {
   const old = byAnilist!.get(anilistId);
-  if (old && old.tvdbId !== m.tvdbId) byTvdb!.set(old.tvdbId, (byTvdb!.get(old.tvdbId) ?? []).filter((x) => x !== anilistId));
+  if (old && old.tvdbId !== m.tvdbId)
+    byTvdb!.set(
+      old.tvdbId,
+      (byTvdb!.get(old.tvdbId) ?? []).filter((x) => x !== anilistId),
+    );
   byAnilist!.set(anilistId, m);
   byTvdb!.set(m.tvdbId, [...new Set([...(byTvdb!.get(m.tvdbId) ?? []), anilistId])]);
 }
 
 export async function saveOverride(anilistId: number, tvdbId: number, season: number | null) {
   await ensure();
-  db.prepare("INSERT INTO mapping_overrides (anilist_id, tvdb_id, season, at) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET tvdb_id = excluded.tvdb_id, season = excluded.season, at = excluded.at").run(anilistId, tvdbId, season, Date.now());
+  db.prepare(
+    "INSERT INTO mapping_overrides (anilist_id, tvdb_id, season, at) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET tvdb_id = excluded.tvdb_id, season = excluded.season, at = excluded.at",
+  ).run(anilistId, tvdbId, season, Date.now());
   inferred.delete(anilistId);
   place(anilistId, { tvdbId, season });
 }
@@ -133,5 +151,13 @@ export async function anilistIdsForTvdb(tvdbId: number): Promise<number[]> {
 
 export async function mappingTables() {
   await ensure();
-  return { byAnilist: byAnilist!, byTvdb: byTvdb!, byMal: byMal!, movieByAnilist: movieByAnilist!, anilistByMovie: anilistByMovie!, imdbByAnilist: imdbByAnilist!, tvdbByAnidb: tvdbByAnidb! };
+  return {
+    byAnilist: byAnilist!,
+    byTvdb: byTvdb!,
+    byMal: byMal!,
+    movieByAnilist: movieByAnilist!,
+    anilistByMovie: anilistByMovie!,
+    imdbByAnilist: imdbByAnilist!,
+    tvdbByAnidb: tvdbByAnidb!,
+  };
 }

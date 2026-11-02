@@ -40,11 +40,16 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
         <div className="choice-grid">
           <button className="choice card" onClick={() => choose("stream")}>
             <strong>I stream it</strong>
-            <span className="muted small">Crunchyroll, Netflix, HIDIVE… Tastearr learns your taste from a short quiz or your AniList list, then shows what's worth watching and where.</span>
+            <span className="muted small">
+              Crunchyroll, Netflix, HIDIVE… Tastearr learns your taste from a short quiz or your AniList list, then shows what's worth
+              watching and where.
+            </span>
           </button>
           <button className="choice card" onClick={() => choose("server")}>
             <strong>I have a media server</strong>
-            <span className="muted small">Sonarr, Radarr, Plex or Jellyfin. Tastearr learns from your library and can add shows for you.</span>
+            <span className="muted small">
+              Sonarr, Radarr, Plex or Jellyfin. Tastearr learns from your library and can add shows for you.
+            </span>
           </button>
         </div>
         {status.profileBuiltAt ? (
@@ -85,7 +90,9 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
           <ListsCard s={s} save={saveAndRefresh} />
           <div className="card pad stack">
             <h2>Or take the 2-minute quiz</h2>
-            <p className="muted small">Pick the kinds of anime you love or never want, then rate a few shows you've seen. You can do this as well as AniList.</p>
+            <p className="muted small">
+              Pick the kinds of anime you love or never want, then rate a few shows you've seen. You can do this as well as AniList.
+            </p>
             <Link to="/quiz?from=setup" className="button primary">
               Take the quiz
             </Link>
@@ -94,7 +101,9 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
       )}
       {name === "Alerts (optional)" && (
         <>
-          <p className="muted small">Want a ping on your phone when a show you follow has a new episode? Set it up now or skip it and do it later in Settings.</p>
+          <p className="muted small">
+            Want a ping on your phone when a show you follow has a new episode? Set it up now or skip it and do it later in Settings.
+          </p>
           <AlertsCard s={s} save={saveAndRefresh} simple />
         </>
       )}
@@ -108,7 +117,8 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
           <button
             className="primary"
             onClick={() => {
-              if (unsaved.size && !confirm(`${[...unsaved].join(" and ")} has changes you haven't saved. Continue without saving them?`)) return;
+              if (unsaved.size && !confirm(`${[...unsaved].join(" and ")} has changes you haven't saved. Continue without saving them?`))
+                return;
               setStep(step + 1);
             }}
           >

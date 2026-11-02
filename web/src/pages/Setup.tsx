@@ -41,7 +41,14 @@ export function Setup({ onDone }: { onDone: () => void }) {
       </label>
       <label>
         Password (at least 8 characters)
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} required />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
       </label>
       <label>
         Type it again
@@ -56,8 +63,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
       </label>
       {mode === "local" && (
         <p className="muted small left">
-          Devices on your home Wi-Fi skip the login. If Tastearr is ever opened from outside your home, it still asks for the password. (Sonarr calls this
-          "Disabled for local addresses".)
+          Devices on your home Wi-Fi skip the login. If Tastearr is ever opened from outside your home, it still asks for the password.
+          (Sonarr calls this "Disabled for local addresses".)
         </p>
       )}
       {needCode && (

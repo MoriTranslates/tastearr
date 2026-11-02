@@ -2,8 +2,22 @@ import { db } from "./db.js";
 import { checkOutbound } from "./outbound.js";
 import { getSettings, type Settings } from "./settings.js";
 
-export interface SonarrSeason { seasonNumber: number; monitored: boolean; statistics?: { episodeFileCount: number; totalEpisodeCount: number; episodeCount: number } }
-export interface SonarrSeries { id: number; tvdbId: number; title: string; seriesType: string; status: string; monitored: boolean; seasons: SonarrSeason[]; instance?: string; [k: string]: unknown }
+export interface SonarrSeason {
+  seasonNumber: number;
+  monitored: boolean;
+  statistics?: { episodeFileCount: number; totalEpisodeCount: number; episodeCount: number };
+}
+export interface SonarrSeries {
+  id: number;
+  tvdbId: number;
+  title: string;
+  seriesType: string;
+  status: string;
+  monitored: boolean;
+  seasons: SonarrSeason[];
+  instance?: string;
+  [k: string]: unknown;
+}
 
 type Conn = Pick<Settings["sonarr"], "url" | "apiKey">;
 
@@ -59,7 +73,8 @@ export async function sonarrSeries(force = false): Promise<SonarrSeries[]> {
   const extra = getSettings().sonarrExtra;
   for (let i = 0; i < extra.length; i++) {
     try {
-      for (const x of await call<SonarrSeries[]>("GET", "/series", undefined, extra[i])) if (!have.has(x.tvdbId)) list.push({ ...x, instance: extra[i].url });
+      for (const x of await call<SonarrSeries[]>("GET", "/series", undefined, extra[i]))
+        if (!have.has(x.tvdbId)) list.push({ ...x, instance: extra[i].url });
     } catch (e) {
       console.warn(`Sonarr "${extra[i].name}" unreachable: ${(e as Error).message}`);
     }
@@ -123,12 +138,19 @@ export async function planAdd(tvdbId: number, season: number | null, firstOfMany
   const cfg = getSettings().sonarr;
   const [s] = await call<SonarrSeries[]>("GET", `/series/lookup?term=tvdb:${tvdbId}`);
   if (!s) throw new Error(`Sonarr found no series for TVDB ${tvdbId}`);
-  const [profiles, tags] = await Promise.all([call<{ id: number; name: string }[]>("GET", "/qualityprofile"), call<{ id: number; label: string }[]>("GET", "/tag")]);
+  const [profiles, tags] = await Promise.all([
+    call<{ id: number; name: string }[]>("GET", "/qualityprofile"),
+    call<{ id: number; label: string }[]>("GET", "/tag"),
+  ]);
   const monitor = defaultMonitor(season, cfg, firstOfMany);
   const seasonListed = !season || s.seasons.some((x) => x.seasonNumber === season);
   const options: { value: MonitorChoice; label: string }[] = [];
   if (season && season > 1) options.push({ value: "season", label: MONITOR_LABEL.season(season) });
-  options.push({ value: "all", label: MONITOR_LABEL.all(null) }, { value: "future", label: MONITOR_LABEL.future(null) }, { value: "none", label: MONITOR_LABEL.none(null) });
+  options.push(
+    { value: "all", label: MONITOR_LABEL.all(null) },
+    { value: "future", label: MONITOR_LABEL.future(null) },
+    { value: "none", label: MONITOR_LABEL.none(null) },
+  );
   return {
     title: s.title,
     year: (s.year as number | undefined) ?? null,
@@ -148,9 +170,29 @@ export async function planAdd(tvdbId: number, season: number | null, firstOfMany
 
 /** Sonarr's own title search: the fallback when the community AniList -> TVDB list hasn't caught up yet. */
 export async function lookupByTitle(titles: string[], year: number | null = null) {
-  const seen = new Map<number, { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean; confident: boolean; rank: number }>();
+  const seen = new Map<
+    number,
+    {
+      tvdbId: number;
+      title: string;
+      year: number | null;
+      network: string | null;
+      seasons: number[];
+      overview: string | null;
+      inLibrary: boolean;
+      confident: boolean;
+      rank: number;
+    }
+  >();
   const owned = new Set((await sonarrSeries().catch(() => [] as SonarrSeries[])).map((x) => x.tvdbId));
-  const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2));
+  const words = (t: string) =>
+    new Set(
+      t
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2),
+    );
   const want = words(titles.join(" "));
   for (const t of titles.filter(Boolean).slice(0, 2)) {
     for (const x of (await call<SonarrSeries[]>("GET", `/series/lookup?term=${encodeURIComponent(t)}`)).slice(0, 6)) {
@@ -162,7 +204,10 @@ export async function lookupByTitle(titles: string[], year: number | null = null
       const overlap = shared / Math.max(1, have.size, Math.min(want.size, 8));
       // Best guess first: title overlap, a little extra when it's a series already in Sonarr (a new season of something
       // owned) and still a close title, then a plausible year (a series can't start after the show we're matching).
-      const rank = overlap * 2 + (owned.has(x.tvdbId) && overlap >= 0.5 ? 0.5 : 0) + (year && y ? (Math.abs(year - y) <= 1 ? 0.5 : y > year ? -1 : 0) : 0);
+      const rank =
+        overlap * 2 +
+        (owned.has(x.tvdbId) && overlap >= 0.5 ? 0.5 : 0) +
+        (year && y ? (Math.abs(year - y) <= 1 ? 0.5 : y > year ? -1 : 0) : 0);
       seen.set(x.tvdbId, {
         tvdbId: x.tvdbId,
         title: x.title,
@@ -184,7 +229,11 @@ export async function lookupByTitle(titles: string[], year: number | null = null
  * Adds a show to Sonarr as an anime series with the chosen monitoring. The default (see defaultMonitor) never
  * downloads a back catalogue the user didn't ask for: sequels get only their season, unclear cases only new episodes.
  */
-export async function addSeries(tvdbId: number, season: number | null, opts: { monitor?: MonitorChoice; search?: boolean; firstOfMany?: boolean } = {}) {
+export async function addSeries(
+  tvdbId: number,
+  season: number | null,
+  opts: { monitor?: MonitorChoice; search?: boolean; firstOfMany?: boolean } = {},
+) {
   const cfg = getSettings().sonarr;
   if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw new Error("Pick a quality profile and root folder in Settings first");
   const [s] = await call<SonarrSeries[]>("GET", `/series/lookup?term=tvdb:${tvdbId}`);
@@ -192,7 +241,8 @@ export async function addSeries(tvdbId: number, season: number | null, opts: { m
   let monitor = opts.monitor ?? defaultMonitor(season, cfg, opts.firstOfMany);
   if (monitor === "season" && !(season && season > 1)) monitor = "future";
   const listed = monitor === "season" && s.seasons.some((x) => x.seasonNumber === season);
-  for (const x of s.seasons) x.monitored = monitor === "all" ? x.seasonNumber > 0 : monitor === "season" ? listed && x.seasonNumber === season : false;
+  for (const x of s.seasons)
+    x.monitored = monitor === "all" ? x.seasonNumber > 0 : monitor === "season" ? listed && x.seasonNumber === season : false;
   const search = (opts.search ?? cfg.searchOnAdd) && (monitor === "all" || listed);
   const tag = await ensureTag();
   const addOptions =

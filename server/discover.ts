@@ -36,7 +36,12 @@ function safeReaddir(dir: string) {
   }
 }
 
-interface Container { Names: string[]; Image: string; Ports: { PrivatePort: number; PublicPort?: number }[]; NetworkSettings: { Networks: Record<string, { IPAddress: string }> } }
+interface Container {
+  Names: string[];
+  Image: string;
+  Ports: { PrivatePort: number; PublicPort?: number }[];
+  NetworkSettings: { Networks: Record<string, { IPAddress: string }> };
+}
 
 function dockerContainers(): Promise<Container[]> {
   if (!fs.existsSync(DOCKER_SOCK)) return Promise.resolve([]);
@@ -68,14 +73,21 @@ function guessUrl(containers: Container[], app: string, folder: string, port: nu
   const hostIp = process.env.TASTEARR_HOST_IP;
   const published = c.Ports.find((p) => p.PrivatePort === port && p.PublicPort);
   if (published && hostIp) return `http://${hostIp}:${published.PublicPort}${base}`;
-  const ip = Object.values(c.NetworkSettings.Networks).map((n) => n.IPAddress).find(Boolean);
+  const ip = Object.values(c.NetworkSettings.Networks)
+    .map((n) => n.IPAddress)
+    .find(Boolean);
   return ip ? `http://${ip}:${port}${base}` : null;
 }
 
 /** Config folders to inspect: /appdata itself (if a single app's folder is mounted there) and its subfolders. */
 function candidates() {
   if (!fs.existsSync(APPDATA)) return [];
-  return [{ name: path.basename(APPDATA), dir: APPDATA }, ...safeReaddir(APPDATA).filter((e) => e.isDirectory()).map((e) => ({ name: e.name, dir: path.join(APPDATA, e.name) }))];
+  return [
+    { name: path.basename(APPDATA), dir: APPDATA },
+    ...safeReaddir(APPDATA)
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, dir: path.join(APPDATA, e.name) })),
+  ];
 }
 
 async function scan(): Promise<{ appdata: boolean; docker: boolean; found: Found[] }> {
@@ -86,7 +98,12 @@ async function scan(): Promise<{ appdata: boolean; docker: boolean; found: Found
     if (!fs.existsSync(cfg)) continue;
     const xml = fs.readFileSync(cfg, "utf8");
     const instance = tag(xml, "InstanceName").toLowerCase();
-    const app = instance.includes("radarr") || name.toLowerCase().includes("radarr") ? "radarr" : instance.includes("sonarr") || name.toLowerCase().includes("sonarr") ? "sonarr" : null;
+    const app =
+      instance.includes("radarr") || name.toLowerCase().includes("radarr")
+        ? "radarr"
+        : instance.includes("sonarr") || name.toLowerCase().includes("sonarr")
+          ? "sonarr"
+          : null;
     const apiKey = tag(xml, "ApiKey");
     if (!app || !apiKey) continue;
     const port = Number(tag(xml, "Port")) || (app === "sonarr" ? 8989 : 7878);
@@ -130,7 +147,8 @@ export async function useDiscovered(id: string, url: string, loggedIn: boolean) 
   const detected = f.url?.replace(/\/+$/, "") === clean;
   if (!detected) {
     if (!loggedIn) throw new Error("Log in with your password to use a different address, or paste the API key yourself");
-    if (!isPrivateHost(u.hostname)) throw new Error("The detected key is only sent to an address on your home network. For anything else, paste the API key yourself.");
+    if (!isPrivateHost(u.hostname))
+      throw new Error("The detected key is only sent to an address on your home network. For anything else, paste the API key yourself.");
   }
   patchSettings((s) => ({ ...s, [f.app]: { ...s[f.app as "sonarr" | "radarr"], url: clean, apiKey: f.apiKey } }));
   return { ok: true, app: f.app };

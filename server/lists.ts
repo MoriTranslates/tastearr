@@ -7,7 +7,10 @@ import { getSettings } from "./settings.js";
  * Imports a public AniList or MyAnimeList anime list. Statuses are normalised to AniList's
  * (COMPLETED, CURRENT, PLANNING, DROPPED, PAUSED, REPEATING) and scores to 0-100.
  */
-export interface ImportResult { source: string; entries: number }
+export interface ImportResult {
+  source: string;
+  entries: number;
+}
 
 function save(source: string, rows: { id: number; status: string; score: number | null; progress: number | null }[]) {
   transaction(() => {
@@ -19,25 +22,44 @@ function save(source: string, rows: { id: number; status: string; score: number 
 
 export async function importAnilist(user: string): Promise<ImportResult> {
   const entries = await anilistUserList(user);
-  save("anilist", entries.map((e) => ({ id: e.mediaId, status: e.status, score: e.score || null, progress: e.progress ?? null })));
+  save(
+    "anilist",
+    entries.map((e) => ({ id: e.mediaId, status: e.status, score: e.score || null, progress: e.progress ?? null })),
+  );
   return { source: "anilist", entries: entries.length };
 }
 
-const MAL_STATUS: Record<string, string> = { completed: "COMPLETED", watching: "CURRENT", plan_to_watch: "PLANNING", dropped: "DROPPED", on_hold: "PAUSED" };
+const MAL_STATUS: Record<string, string> = {
+  completed: "COMPLETED",
+  watching: "CURRENT",
+  plan_to_watch: "PLANNING",
+  dropped: "DROPPED",
+  on_hold: "PAUSED",
+};
 
 export async function importMal(user: string, clientId: string): Promise<ImportResult> {
   if (!clientId) throw new Error("MyAnimeList needs a free API client ID (myanimelist.net/apiconfig)");
   const { byMal } = await mappingTables();
   const rows: { id: number; status: string; score: number | null; progress: number | null }[] = [];
-  let url: string | null = `https://api.myanimelist.net/v2/users/${encodeURIComponent(user)}/animelist?fields=list_status&limit=1000&nsfw=true`;
+  let url: string | null =
+    `https://api.myanimelist.net/v2/users/${encodeURIComponent(user)}/animelist?fields=list_status&limit=1000&nsfw=true`;
   for (let page = 0; url && page < 20; page++) {
     const res: Response = await fetch(url, { headers: { "X-MAL-CLIENT-ID": clientId }, signal: AbortSignal.timeout(30_000) });
     if (res.status === 404) throw new Error(`MyAnimeList user "${user}" not found or list is private`);
     if (!res.ok) throw new Error(`MyAnimeList failed (HTTP ${res.status})`);
-    const d = (await res.json()) as { data: { node: { id: number }; list_status: { status: string; score: number; num_episodes_watched: number } }[]; paging?: { next?: string } };
+    const d = (await res.json()) as {
+      data: { node: { id: number }; list_status: { status: string; score: number; num_episodes_watched: number } }[];
+      paging?: { next?: string };
+    };
     for (const e of d.data) {
       const id = byMal.get(e.node.id);
-      if (id) rows.push({ id, status: MAL_STATUS[e.list_status.status] ?? "PLANNING", score: e.list_status.score ? e.list_status.score * 10 : null, progress: e.list_status.num_episodes_watched });
+      if (id)
+        rows.push({
+          id,
+          status: MAL_STATUS[e.list_status.status] ?? "PLANNING",
+          score: e.list_status.score ? e.list_status.score * 10 : null,
+          progress: e.list_status.num_episodes_watched,
+        });
     }
     url = d.paging?.next ?? null;
   }
@@ -55,5 +77,11 @@ export async function refreshLists() {
 }
 
 export function listEntries() {
-  return db.prepare("SELECT source, anilist_id AS id, status, score, progress FROM list_entries").all() as { source: string; id: number; status: string; score: number | null; progress: number | null }[];
+  return db.prepare("SELECT source, anilist_id AS id, status, score, progress FROM list_entries").all() as {
+    source: string;
+    id: number;
+    status: string;
+    score: number | null;
+    progress: number | null;
+  }[];
 }

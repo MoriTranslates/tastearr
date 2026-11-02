@@ -15,7 +15,11 @@ import { seasonOwned, sonarrSeries, type SonarrSeries } from "./sonarr.js";
  * recommendation time (the single best predictor in offline tests; see `npm run eval`).
  */
 
-export interface FeatureStat { lift: number; n: number; p: number }
+export interface FeatureStat {
+  lift: number;
+  n: number;
+  p: number;
+}
 export interface Profile {
   builtAt: number;
   trainedOn: number;
@@ -45,27 +49,74 @@ const GENRE_WEIGHT = TUNE.genre ?? 0.5;
 const PRIOR_N = 10;
 /** Tags that carry a little signal but make meaningless explanations. */
 export const QUIET_TAGS = new Set([
-  "Male Protagonist", "Female Protagonist", "Heterosexual", "Shounen", "Seinen", "Shoujo", "Josei", "Primarily Adult Cast",
-  "Primarily Teen Cast", "Primarily Male Cast", "Primarily Female Cast", "Ensemble Cast", "Coming of Age", "Episodic",
-  "Primarily Child Cast", "Primarily Animal Cast", "Full CGI", "Chibi", "Kemonomimi", "Kuudere", "Tsundere", "Nudity", "Gore",
+  "Male Protagonist",
+  "Female Protagonist",
+  "Heterosexual",
+  "Shounen",
+  "Seinen",
+  "Shoujo",
+  "Josei",
+  "Primarily Adult Cast",
+  "Primarily Teen Cast",
+  "Primarily Male Cast",
+  "Primarily Female Cast",
+  "Ensemble Cast",
+  "Coming of Age",
+  "Episodic",
+  "Primarily Child Cast",
+  "Primarily Animal Cast",
+  "Full CGI",
+  "Chibi",
+  "Kemonomimi",
+  "Kuudere",
+  "Tsundere",
+  "Nudity",
+  "Gore",
   // Real signal, but "you usually skip disability" reads badly as an explanation.
-  "Disability", "LGBTQ+ Themes", "Mental Illness", "Suicide", "Bullying", "Slavery", "Assassins", "Curses",
+  "Disability",
+  "LGBTQ+ Themes",
+  "Mental Illness",
+  "Suicide",
+  "Bullying",
+  "Slavery",
+  "Assassins",
+  "Curses",
 ]);
 /** Plain names for AniList tags that read oddly on a card (the quiz uses the same words). */
 const TAG_LABEL: Record<string, string> = {
-  "Female Harem": "Harem", "Male Harem": "Reverse harem", "Cute Girls Doing Cute Things": "Cute & cozy", Iyashikei: "Relaxing",
-  "Video Games": "Video-game world", "Urban Fantasy": "Modern-day fantasy", "Super Power": "Superpowers", Swordplay: "Sword fights",
+  "Female Harem": "Harem",
+  "Male Harem": "Reverse harem",
+  "Cute Girls Doing Cute Things": "Cute & cozy",
+  Iyashikei: "Relaxing",
+  "Video Games": "Video-game world",
+  "Urban Fantasy": "Modern-day fantasy",
+  "Super Power": "Superpowers",
+  Swordplay: "Sword fights",
 };
 export const GORE_TAGS = ["Gore", "Body Horror", "Torture", "Cannibalism"];
 const CANDIDATE_FORMATS = new Set(["TV", "TV_SHORT", "ONA", "MOVIE"]);
 const EPISODIC_FORMATS = new Set(["TV", "TV_SHORT", "ONA"]);
 const SOURCE_LABEL: Record<string, string> = {
-  LIGHT_NOVEL: "Light novel", MANGA: "Manga", ORIGINAL: "Original story", WEB_NOVEL: "Web novel", VIDEO_GAME: "Video game", NOVEL: "Novel", VISUAL_NOVEL: "Visual novel",
+  LIGHT_NOVEL: "Light novel",
+  MANGA: "Manga",
+  ORIGINAL: "Original story",
+  WEB_NOVEL: "Web novel",
+  VIDEO_GAME: "Video game",
+  NOVEL: "Novel",
+  VISUAL_NOVEL: "Visual novel",
 };
 /** One name per streaming service, so filters and chips don't split "Amazon Prime Video" from "Prime Video". */
 const SERVICE_ALIASES: Record<string, string> = {
-  "Amazon Prime Video": "Prime Video", Amazon: "Prime Video", "Amazon Video": "Prime Video", "Disney Plus": "Disney+", "Hulu Japan": "Hulu",
-  "HIDIVE": "HIDIVE", "Hidive": "HIDIVE", "Bilibili": "Bilibili TV", "iQ": "iQIYI", "iQiyi": "iQIYI",
+  "Amazon Prime Video": "Prime Video",
+  Amazon: "Prime Video",
+  "Amazon Video": "Prime Video",
+  "Disney Plus": "Disney+",
+  "Hulu Japan": "Hulu",
+  HIDIVE: "HIDIVE",
+  Hidive: "HIDIVE",
+  Bilibili: "Bilibili TV",
+  iQ: "iQIYI",
+  iQiyi: "iQIYI",
 };
 
 export function features(m: Media, minRank = getSettings().training.minTagRank): string[] {
@@ -76,7 +127,9 @@ export function features(m: Media, minRank = getSettings().training.minTagRank):
 }
 
 export const label = (f: string) =>
-  f.startsWith("S:") ? `${SOURCE_LABEL[f.slice(2)] ?? f.slice(2).replace(/_/g, " ").toLowerCase()} adaptation` : (TAG_LABEL[f.slice(2)] ?? f.slice(2));
+  f.startsWith("S:")
+    ? `${SOURCE_LABEL[f.slice(2)] ?? f.slice(2).replace(/_/g, " ").toLowerCase()} adaptation`
+    : (TAG_LABEL[f.slice(2)] ?? f.slice(2));
 
 export function title(m: Media) {
   const lang = getSettings().display.titleLanguage;
@@ -95,7 +148,11 @@ const isShort = (m: Media) => m.format !== "MOVIE" && (m.duration ? m.duration <
 
 // ---------------------------------------------------------------- what we know about the user
 
-interface ListEntry { status: string; score: number | null; progress: number | null }
+interface ListEntry {
+  status: string;
+  score: number | null;
+  progress: number | null;
+}
 
 export interface Ctx {
   lib: Map<number, SonarrSeries>;
@@ -131,9 +188,11 @@ export async function context(force = false): Promise<Ctx> {
     return ctx;
   });
   ctxBuilding = { gen, p };
-  void p.finally(() => {
-    if (ctxBuilding?.p === p) ctxBuilding = null;
-  }).catch(() => undefined);
+  void p
+    .finally(() => {
+      if (ctxBuilding?.p === p) ctxBuilding = null;
+    })
+    .catch(() => undefined);
   return p;
 }
 
@@ -172,7 +231,11 @@ async function buildContext(force: boolean): Promise<Ctx> {
     }
   }
 
-  const fbRows = db.prepare("SELECT anilist_id, verdict, source FROM feedback").all() as { anilist_id: number; verdict: string; source: string }[];
+  const fbRows = db.prepare("SELECT anilist_id, verdict, source FROM feedback").all() as {
+    anilist_id: number;
+    verdict: string;
+    source: string;
+  }[];
   const quiz = fbRows.filter((r) => r.source === "quiz").length;
   if (quiz || fbRows.length) sources.ratings = `${quiz} quiz answers, ${fbRows.length - quiz} ratings`;
 
@@ -208,7 +271,12 @@ export async function cachedWatch() {
   return (await context()).watch;
 }
 
-interface Label { n: number; p: number; fav: boolean; known: boolean }
+interface Label {
+  n: number;
+  p: number;
+  fav: boolean;
+  known: boolean;
+}
 
 /** Finished airing more than about two seasons ago. */
 function finishedLongAgo(m: Media | null) {
@@ -233,7 +301,8 @@ export function choseWithFiles(id: number, ctx: Ctx) {
   const map = ctx.byAnilist.get(id);
   const s = map ? ctx.lib.get(map.tvdbId) : undefined;
   if (s) {
-    const seasons = map!.season !== null ? s.seasons.filter((x) => x.seasonNumber === map!.season) : s.seasons.filter((x) => x.seasonNumber > 0);
+    const seasons =
+      map!.season !== null ? s.seasons.filter((x) => x.seasonNumber === map!.season) : s.seasons.filter((x) => x.seasonNumber > 0);
     if (seasons.some((x) => (x.statistics?.episodeFileCount ?? 0) > 0)) return true;
   }
   const tmdb = ctx.movieByAnilist.get(id);
@@ -318,12 +387,18 @@ export function labelOf(id: number, ctx: Ctx): Label {
   if (tvdb && ctx.dropped.has(tvdb)) return { n: 1.5, p: 0.2, fav: false, known: true };
   if (ctx.following.has(id)) [p, known] = [Math.max(p, 1.5), true];
   switch (ctx.fb.get(id)) {
-    case "loved": return { n: 1, p: 3, fav: true, known: true };
-    case "liked": return { n: 1, p: 2, fav: true, known: true };
-    case "added": return { n, p: Math.max(p, 1.5), fav, known: true };
-    case "meh": return { n: 1, p: 0.3, fav: false, known: true };
-    case "hidden": return { n: 1, p: Math.min(p, 0.2), fav: false, known: true };
-    case "disliked": return { n: 2, p: 0, fav: false, known: true };
+    case "loved":
+      return { n: 1, p: 3, fav: true, known: true };
+    case "liked":
+      return { n: 1, p: 2, fav: true, known: true };
+    case "added":
+      return { n, p: Math.max(p, 1.5), fav, known: true };
+    case "meh":
+      return { n: 1, p: 0.3, fav: false, known: true };
+    case "hidden":
+      return { n: 1, p: Math.min(p, 0.2), fav: false, known: true };
+    case "disliked":
+      return { n: 2, p: 0, fav: false, known: true };
   }
   return { n, p, fav, known };
 }
@@ -338,7 +413,7 @@ function franchises(items: Map<number, Media>) {
   const find = (x: number): number => {
     let r = x;
     while (parent.get(r) !== r) r = parent.get(r)!;
-    for (let c = x; c !== r; ) {
+    for (let c = x; c !== r;) {
       const next = parent.get(c)!;
       parent.set(c, r);
       c = next;
@@ -346,7 +421,9 @@ function franchises(items: Map<number, Media>) {
     return r;
   };
   for (const id of items.keys()) parent.set(id, id);
-  for (const m of items.values()) for (const e of m.relations?.edges ?? []) if (CHAIN.has(e.relationType) && items.has(e.node.id)) parent.set(find(m.id), find(e.node.id));
+  for (const m of items.values())
+    for (const e of m.relations?.edges ?? [])
+      if (CHAIN.has(e.relationType) && items.has(e.node.id)) parent.set(find(m.id), find(e.node.id));
   const size = new Map<number, number>();
   for (const id of items.keys()) size.set(find(id), (size.get(find(id)) ?? 0) + 1);
   return { root: find, size: (id: number) => size.get(find(id)) ?? 1 };
@@ -399,7 +476,10 @@ export async function buildProfile(opts: { until?: { season: Season; year: numbe
     const unknownWeight = ctx.hasHistory ? 1 : 0.08;
     const rows = [...items.values()].map((m) => {
       const l = labelOf(m.id, ctx);
-      const ago = m.season && m.seasonYear ? Math.max(0, seasonIdx(end) - seasonIdx({ season: m.season, year: m.seasonYear }) - 1) : s.training.seasons;
+      const ago =
+        m.season && m.seasonYear
+          ? Math.max(0, seasonIdx(end) - seasonIdx({ season: m.season, year: m.seasonYear }) - 1)
+          : s.training.seasons;
       const w = ((l.known ? 1 : unknownWeight) / fr.size(m.id)) * Math.max(0.3, (TUNE.decay ?? 0.9) ** ago);
       return { m, l, w };
     });
@@ -430,7 +510,11 @@ export async function buildProfile(opts: { until?: { season: Season; year: numbe
     const feats: Record<string, FeatureStat> = {};
     for (const [f, a] of acc) {
       if (a.n < (MIN_SUPPORT[f[0]] ?? 6) * minScale) continue;
-      feats[f] = { lift: (a.p + b * SMOOTH * minScale) / (a.n + SMOOTH * minScale) / b, n: Math.round(a.n * 10) / 10, p: Math.round(a.p * 10) / 10 };
+      feats[f] = {
+        lift: (a.p + b * SMOOTH * minScale) / (a.n + SMOOTH * minScale) / b,
+        n: Math.round(a.n * 10) / 10,
+        p: Math.round(a.p * 10) / 10,
+      };
     }
 
     // One favourite per franchise: the entry they liked most.
@@ -456,7 +540,9 @@ export async function buildProfile(opts: { until?: { season: Season; year: numbe
       sources: ctx.sources,
     };
     if (save) {
-      db.prepare("INSERT INTO settings (key, value) VALUES ('profile', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(profile));
+      db.prepare("INSERT INTO settings (key, value) VALUES ('profile', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
+        JSON.stringify(profile),
+      );
       setJob("profile", "done", `Learned from ${profile.known} shows you've seen or rated`);
     }
     return profile;
@@ -561,7 +647,12 @@ function jaccard(a: Set<string>, b: string[]) {
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const fmtDate = (d: Media["startDate"]) =>
-  d?.year ? [d.year, d.month, d.day].filter((x): x is number => !!x).map((x, i) => (i ? String(x).padStart(2, "0") : String(x))).join("-") : null;
+  d?.year
+    ? [d.year, d.month, d.day]
+        .filter((x): x is number => !!x)
+        .map((x, i) => (i ? String(x).padStart(2, "0") : String(x)))
+        .join("-")
+    : null;
 /**
  * Score -> 0-100. Slope fitted by `npm run eval` (a = 1.2); the midpoint is set one point below the fitted
  * 50%-kept line (5.6), so 50% here means "you keep roughly 1 in 4 shows like this" and strong picks read 85-95%.
@@ -616,7 +707,13 @@ function inferMapping(m: Media, immediate: Media | null, ctx: Ctx): Mapping | un
   if (!pm || !series) return undefined;
   const next = pm.season ? pm.season + 1 : null;
   const claimed = (ctx.byTvdb.get(pm.tvdbId) ?? []).some((id) => ctx.byAnilist.get(id)?.season === next);
-  const season = next && !claimed && series.seasons.some((x) => x.seasonNumber === next) && !/part\s*(2|ii)|2nd cour|cour 2/i.test(`${m.title.english} ${m.title.romaji}`) ? next : null;
+  const season =
+    next &&
+    !claimed &&
+    series.seasons.some((x) => x.seasonNumber === next) &&
+    !/part\s*(2|ii)|2nd cour|cour 2/i.test(`${m.title.english} ${m.title.romaji}`)
+      ? next
+      : null;
   const out = { tvdbId: pm.tvdbId, season };
   setInferred(m.id, out);
   return out;
@@ -644,11 +741,18 @@ export interface ScoreOptions {
 export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx, opts: ScoreOptions = {}): Pick[] {
   const s = getSettings();
   const kidsLift = profile.features["T:Kids"]?.lift ?? 0;
-  const neverGenres = new Set([...s.filters.excludeGenres, ...Object.entries(s.genrePrefs).filter(([k, v]) => v === "never" && !k.includes(":")).map(([g]) => g)]);
+  const neverGenres = new Set([
+    ...s.filters.excludeGenres,
+    ...Object.entries(s.genrePrefs)
+      .filter(([k, v]) => v === "never" && !k.includes(":"))
+      .map(([g]) => g),
+  ]);
   const excludeTags = new Set([
     ...s.filters.excludeTags.filter((t) => !(t === "Kids" && kidsLift >= 1.2)),
     ...(s.filters.noGore ? GORE_TAGS : []),
-    ...Object.entries(s.genrePrefs).filter(([k, v]) => v === "never" && k.startsWith("T:")).map(([k]) => k.slice(2)),
+    ...Object.entries(s.genrePrefs)
+      .filter(([k, v]) => v === "never" && k.startsWith("T:"))
+      .map(([k]) => k.slice(2)),
   ]);
   const pops = candidates.map((m) => m.popularity).sort((a, b) => a - b);
   const pct = (p: number) => (pops.length > 1 ? pops.filter((x) => x < p).length / (pops.length - 1) : 0.5);
@@ -699,7 +803,10 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       frontier = next;
     }
     // A spin-off / side story of something the user follows earns a small nudge, never a sequel boost.
-    const parent = parentIds(m).map(cachedMedia).find((x): x is Media => !!x) ?? null;
+    const parent =
+      parentIds(m)
+        .map(cachedMedia)
+        .find((x): x is Media => !!x) ?? null;
     const parentLabel = parent ? labelOf(parent.id, ctx) : null;
     const tiny = isShort(m) || (m.popularity < 1000 && (m.episodes ?? 99) < 6);
 
@@ -708,12 +815,28 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     // Too few tags (usual before airing): borrow from the earlier season, the parent, or else the source manga/novel,
     // which AniList has tagged for years (eval with sparse pre-air tags: recovers about half the lost accuracy).
     const tagged = (x: Media) => features(x).filter((f) => f.startsWith("T:")).length >= 3;
-    const donor = immediate ?? parent ?? sourceIds(m).map(cachedMedia).find((x): x is Media => !!x && tagged(x)) ?? null;
+    const donor =
+      immediate ??
+      parent ??
+      sourceIds(m)
+        .map(cachedMedia)
+        .find((x): x is Media => !!x && tagged(x)) ??
+      null;
     // Only tags travel: a manga's own source ("original") or genres say nothing about the anime.
-    if (feats.filter((f) => f.startsWith("T:")).length < 4 && donor) feats = [...new Set([...feats, ...features(donor).filter((f) => (donor === immediate || donor === parent ? !f.startsWith("G:") : f.startsWith("T:")))])];
+    if (feats.filter((f) => f.startsWith("T:")).length < 4 && donor)
+      feats = [
+        ...new Set([
+          ...feats,
+          ...features(donor).filter((f) => (donor === immediate || donor === parent ? !f.startsWith("G:") : f.startsWith("T:"))),
+        ]),
+      ];
     const g = feats.filter((f) => f.startsWith("G:") && profile.features[f]).map((f) => Math.log(profile.features[f].lift));
-    const t = feats.filter((f) => !f.startsWith("G:") && profile.features[f]).map((f) => Math.log(profile.features[f].lift)).sort((a, b) => b - a);
-    const taste = (TUNE.taste ?? 0.8) * (GENRE_WEIGHT * mean(g) + (t.length ? mean(t) * 3 + mean(t.slice(0, 4)) : 0)) * (t.length / (t.length + 4));
+    const t = feats
+      .filter((f) => !f.startsWith("G:") && profile.features[f])
+      .map((f) => Math.log(profile.features[f].lift))
+      .sort((a, b) => b - a);
+    const taste =
+      (TUNE.taste ?? 0.8) * (GENRE_WEIGHT * mean(g) + (t.length ? mean(t) * 3 + mean(t.slice(0, 4)) : 0)) * (t.length / (t.length + 4));
 
     const pl = pre?.label;
     let franchise = !pl ? 0 : pl.p >= 1.5 ? (TUNE.frHi ?? 2.5) : pl.p >= 1 ? (TUNE.frMid ?? 1.5) : pl.p <= 0.3 ? (TUNE.frLo ?? -0.5) : 0;
@@ -730,7 +853,8 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     const myStatus = opts.blind ? null : ownStatus(m.id, m, ctx, inLibrary);
     const verdict = opts.blind ? null : (ctx.fb.get(m.id) ?? null);
 
-    const verdictAdj = verdict === "disliked" || verdict === "hidden" ? -10 : verdict === "loved" || verdict === "liked" || verdict === "added" ? 3 : 0;
+    const verdictAdj =
+      verdict === "disliked" || verdict === "hidden" ? -10 : verdict === "loved" || verdict === "liked" || verdict === "added" ? 3 : 0;
     const statusAdj = myStatus === "planning" ? 1.5 : myStatus === "dropped" ? -6 : 0;
     // Before a show airs its AniList popularity is a fraction of what it ends at (the eval sees final numbers), so the
     // absolute term gets a floor there; the within-season percentile still orders pre-air shows against each other.
@@ -748,12 +872,17 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     // Compilation / recap films retell a series: label them as such rather than as a spin-off.
     // AniList puts the SUMMARY edge on the original, pointing at its recap; the recap points back as PARENT.
     const compilation =
-      isMovie && !!parent && ((parent.relations?.edges ?? []).some((e) => e.relationType === "SUMMARY" && e.node.id === m.id) || /\b(compilation|recap|recompil|re-?edit)\b/i.test(m.description ?? ""));
+      isMovie &&
+      !!parent &&
+      ((parent.relations?.edges ?? []).some((e) => e.relationType === "SUMMARY" && e.node.id === m.id) ||
+        /\b(compilation|recap|recompil|re-?edit)\b/i.test(m.description ?? ""));
     // A retelling of something already seen is an optional rewatch: one consistent, modest score.
     if (compilation && parentLabel?.known && parentLabel.p >= 1) match = 50;
 
     // Where a show came from ("light novel adaptation") ranks, but makes a confusing reason chip, so it isn't shown.
-    const byLift = feats.filter((f) => profile.features[f] && !f.startsWith("S:") && !QUIET_TAGS.has(f.slice(2))).map((f) => ({ label: label(f), lift: Math.round(profile.features[f].lift * 10) / 10 }));
+    const byLift = feats
+      .filter((f) => profile.features[f] && !f.startsWith("S:") && !QUIET_TAGS.has(f.slice(2)))
+      .map((f) => ({ label: label(f), lift: Math.round(profile.features[f].lift * 10) / 10 }));
 
     const continuing = !!pl && pl.p >= 1;
     let similar: string | null = null;
@@ -772,7 +901,9 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     }
 
     const badGenre = m.genres.find((x) => neverGenres.has(x));
-    const badTag = m.tags.find((x) => excludeTags.has(x.name) && x.rank >= (s.filters.noGore && GORE_TAGS.includes(x.name) ? 35 : s.training.minTagRank));
+    const badTag = m.tags.find(
+      (x) => excludeTags.has(x.name) && x.rank >= (s.filters.noGore && GORE_TAGS.includes(x.name) ? 35 : s.training.minTagRank),
+    );
     const excluded =
       verdict === "disliked"
         ? "You marked this 👎"
@@ -817,12 +948,19 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
     const needsMatch = !isMovie && sonarrOn && !map;
     const matchGuessed = !!map && !ctx.byAnilist.has(m.id);
     const cantAdd = addVia ? null : isMovie ? (radarrConfigured() ? "Not matched to a movie database yet" : null) : null;
-    const desc = m.description?.replace(/~!.*?!~/gs, "[spoiler hidden]").replace(/<[^>]+>/g, "").replace(/\s*\(Source:[^)]*\)\s*$/i, "").trim();
+    const desc = m.description
+      ?.replace(/~!.*?!~/gs, "[spoiler hidden]")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s*\(Source:[^)]*\)\s*$/i, "")
+      .trim();
 
     return {
       id: m.id,
       title: immediate && title(immediate) === title(m) && m.title.romaji ? m.title.romaji : title(m),
-      altTitle: ((m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null) === title(m) ? null : ((m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null),
+      altTitle:
+        ((m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null) === title(m)
+          ? null
+          : ((m.title.romaji !== title(m) ? m.title.romaji : m.title.english) ?? null),
       section,
       carryOver,
       format: m.format,
@@ -833,7 +971,8 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       source: m.source ? (SOURCE_LABEL[m.source] ?? m.source.replace(/_/g, " ").toLowerCase()) : null,
       startDate: fmtDate(m.startDate),
       // AniList gives movies a placeholder "episode 1" at the release date; that's a release, not a weekly slot.
-      nextAiring: !isMovie && m.nextAiringEpisode ? { at: m.nextAiringEpisode.airingAt * 1000, episode: m.nextAiringEpisode.episode } : null,
+      nextAiring:
+        !isMovie && m.nextAiringEpisode ? { at: m.nextAiringEpisode.airingAt * 1000, episode: m.nextAiringEpisode.episode } : null,
       streaming: streamingLinks(m),
       trailer: m.trailer?.site === "youtube" ? `https://youtu.be/${m.trailer.id}` : null,
       cover: m.coverImage.large,
@@ -851,8 +990,14 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       spinOffOf: !continues && !compilation && !pl && parent ? title(parent) : null,
       compilationOf: compilation && parent ? { title: title(parent), seen: !!parentLabel?.known && parentLabel.p >= 1 } : null,
       myStatus,
-      reasons: byLift.filter((x) => x.lift >= 1.3).sort((a, b) => b.lift - a.lift).slice(0, 3),
-      warnings: byLift.filter((x) => x.lift <= 0.6).sort((a, b) => a.lift - b.lift).slice(0, 2),
+      reasons: byLift
+        .filter((x) => x.lift >= 1.3)
+        .sort((a, b) => b.lift - a.lift)
+        .slice(0, 3),
+      warnings: byLift
+        .filter((x) => x.lift <= 0.6)
+        .sort((a, b) => a.lift - b.lift)
+        .slice(0, 2),
       similar,
       excluded,
       tvdbId: map?.tvdbId ?? null,
@@ -860,11 +1005,12 @@ export function scoreCandidates(candidates: Media[], profile: Profile, ctx: Ctx,
       tmdbId,
       inLibrary,
       // Season unknown (a guessed match): if the series and its latest season are monitored, new episodes arrive anyway.
-      seasonMonitored: inLib && map?.season
-        ? (inLib.seasons.find((x) => x.seasonNumber === map.season)?.monitored ?? false)
-        : inLib && matchGuessed
-          ? inLib.monitored && !!inLib.seasons.filter((x) => x.seasonNumber > 0).at(-1)?.monitored
-          : null,
+      seasonMonitored:
+        inLib && map?.season
+          ? (inLib.seasons.find((x) => x.seasonNumber === map.season)?.monitored ?? false)
+          : inLib && matchGuessed
+            ? inLib.monitored && !!inLib.seasons.filter((x) => x.seasonNumber > 0).at(-1)?.monitored
+            : null,
       addVia,
       cantAdd,
       needsMatch,
@@ -878,7 +1024,8 @@ export async function recommend(season: Season, year: number, refresh = false): 
   const s = getSettings();
   const [list, profile, ctx] = await Promise.all([getSeason(season, year, refresh), getProfile(), context(refresh)]);
   const countries = new Set(s.training.countries);
-  const ok = (m: Media) => !m.isAdult && !!m.format && CANDIDATE_FORMATS.has(m.format) && (!m.countryOfOrigin || countries.has(m.countryOfOrigin));
+  const ok = (m: Media) =>
+    !m.isAdult && !!m.format && CANDIDATE_FORMATS.has(m.format) && (!m.countryOfOrigin || countries.has(m.countryOfOrigin));
 
   // Carry-overs: anything the user follows that started earlier and is still airing into this season.
   const seasonStart = new Date(year, SEASONS.indexOf(season) * 3, 1).getTime();
@@ -887,9 +1034,16 @@ export async function recommend(season: Season, year: number, refresh = false): 
   for (const [id, e] of ctx.lists) if (e.status === "CURRENT" || e.status === "PLANNING") followed.add(id);
   // For a season that hasn't started, shows already in Sonarr are on My Shows; don't let them fill the top of next season.
   const upcoming = seasonStart > Date.now();
-  if (!upcoming) for (const [tvdb, x] of ctx.lib) if (x.seriesType === "anime" && x.status === "continuing" && x.monitored) for (const id of ctx.byTvdb.get(tvdb) ?? []) followed.add(id);
+  if (!upcoming)
+    for (const [tvdb, x] of ctx.lib)
+      if (x.seriesType === "anime" && x.status === "continuing" && x.monitored)
+        for (const id of ctx.byTvdb.get(tvdb) ?? []) followed.add(id);
   const carryCandidates = (await getMediaByIds([...followed].filter((id) => !ids.has(id)).slice(0, 400)).catch(() => [] as Media[])).filter(
-    (m) => ok(m) && airsInto(m, seasonStart) && m.seasonYear !== null && (m.seasonYear ?? 0) * 4 + SEASONS.indexOf(m.season ?? "WINTER") < year * 4 + SEASONS.indexOf(season),
+    (m) =>
+      ok(m) &&
+      airsInto(m, seasonStart) &&
+      m.seasonYear !== null &&
+      (m.seasonYear ?? 0) * 4 + SEASONS.indexOf(m.season ?? "WINTER") < year * 4 + SEASONS.indexOf(season),
   );
   const carryIds = new Set(carryCandidates.map((m) => m.id));
   // AniList pages can repeat a show when popularity shifts mid-pagination.
@@ -912,13 +1066,16 @@ export async function recommend(season: Season, year: number, refresh = false): 
 export function setFeedback(id: number, verdict: string | null, source = "picks") {
   if (!verdict) db.prepare("DELETE FROM feedback WHERE anilist_id = ?").run(id);
   else
-    db.prepare("INSERT INTO feedback (anilist_id, verdict, source, at) VALUES (?, ?, ?, ?) ON CONFLICT(anilist_id) DO UPDATE SET verdict = excluded.verdict, source = excluded.source, at = excluded.at").run(
-      id,
-      verdict,
-      source,
-      Date.now(),
+    db.prepare(
+      "INSERT INTO feedback (anilist_id, verdict, source, at) VALUES (?, ?, ?, ?) ON CONFLICT(anilist_id) DO UPDATE SET verdict = excluded.verdict, source = excluded.source, at = excluded.at",
+    ).run(id, verdict, source, Date.now());
+  if (ctxCache)
+    ctxCache.ctx.fb = new Map(
+      (db.prepare("SELECT anilist_id, verdict FROM feedback").all() as { anilist_id: number; verdict: string }[]).map((r) => [
+        r.anilist_id,
+        r.verdict,
+      ]),
     );
-  if (ctxCache) ctxCache.ctx.fb = new Map((db.prepare("SELECT anilist_id, verdict FROM feedback").all() as { anilist_id: number; verdict: string }[]).map((r) => [r.anilist_id, r.verdict]));
 }
 
 export function invalidateContext() {

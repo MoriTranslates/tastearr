@@ -3,10 +3,33 @@ import { api, type Pref } from "../api";
 import { navigate } from "../App";
 import { ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
 
-interface QuizShow { id: number; title: string; cover: string | null; year: number | null; genres: string[]; archetype: string; answer: string | null }
-interface Option { key: string; label: string }
-interface QuizData { genres: Option[]; themes: Option[]; noGore: boolean; genrePrefs: Record<string, Pref>; shows: QuizShow[] }
-interface Found { id: number; title: string; cover: string | null; year: number | null; format: string | null }
+interface QuizShow {
+  id: number;
+  title: string;
+  cover: string | null;
+  year: number | null;
+  genres: string[];
+  archetype: string;
+  answer: string | null;
+}
+interface Option {
+  key: string;
+  label: string;
+}
+interface QuizData {
+  genres: Option[];
+  themes: Option[];
+  noGore: boolean;
+  genrePrefs: Record<string, Pref>;
+  shows: QuizShow[];
+}
+interface Found {
+  id: number;
+  title: string;
+  cover: string | null;
+  year: number | null;
+  format: string | null;
+}
 
 const ANSWERS = [
   { v: "loved", label: "Loved" },
@@ -97,7 +120,17 @@ export function Quiz({ onDone }: { onDone: () => void }) {
   }
 
   function addFound(f: Found) {
-    setData((d) => (d && !d.shows.some((x) => x.id === f.id) ? { ...d, shows: [{ id: f.id, title: f.title, cover: f.cover, year: f.year, genres: [], archetype: "Added by you", answer: null }, ...d.shows] } : d));
+    setData((d) =>
+      d && !d.shows.some((x) => x.id === f.id)
+        ? {
+            ...d,
+            shows: [
+              { id: f.id, title: f.title, cover: f.cover, year: f.year, genres: [], archetype: "Added by you", answer: null },
+              ...d.shows,
+            ],
+          }
+        : d,
+    );
     setFound(null);
     setQ("");
   }
@@ -144,7 +177,8 @@ export function Quiz({ onDone }: { onDone: () => void }) {
             ))}
           </div>
           <label className="check card pad">
-            <input type="checkbox" checked={noGore} onChange={(e) => setNoGore(e.target.checked)} /> Hide shows with gore or graphic violence
+            <input type="checkbox" checked={noGore} onChange={(e) => setNoGore(e.target.checked)} /> Hide shows with gore or graphic
+            violence
           </label>
           <div className="row end">
             <button className="primary" disabled={saving} onClick={saveGenres}>
@@ -159,7 +193,13 @@ export function Quiz({ onDone }: { onDone: () => void }) {
           <h1>Rate shows you've seen</h1>
           <p className="muted">Skip anything you haven't watched. About 10 answers is plenty to start. ({answered} so far)</p>
           <form className="row" onSubmit={search} role="search">
-            <input type="search" placeholder="Add a show you've seen, e.g. Frieren" aria-label="Find a show you've seen" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input
+              type="search"
+              placeholder="Add a show you've seen, e.g. Frieren"
+              aria-label="Find a show you've seen"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
             <button className="ghost" disabled={searching}>
               {searching ? "Searching…" : "Find"}
             </button>
@@ -171,7 +211,8 @@ export function Quiz({ onDone }: { onDone: () => void }) {
                 <button key={f.id} className="cand row" onClick={() => addFound(f)}>
                   {f.cover && <img src={f.cover} alt="" width={32} height={45} />}
                   <span>
-                    <strong>{f.title}</strong> <span className="muted small">{[f.year, f.format?.replace("_", " ")].filter(Boolean).join(" · ")}</span>
+                    <strong>{f.title}</strong>{" "}
+                    <span className="muted small">{[f.year, f.format?.replace("_", " ")].filter(Boolean).join(" · ")}</span>
                   </span>
                 </button>
               ))}
@@ -188,7 +229,13 @@ export function Quiz({ onDone }: { onDone: () => void }) {
                     {ANSWERS.map((a) => {
                       const on = s.answer === a.v;
                       return (
-                        <button key={a.v} role="radio" aria-checked={on} className={on ? `on ${a.v}` : ""} onClick={() => answer(s, a.v, s.answer)}>
+                        <button
+                          key={a.v}
+                          role="radio"
+                          aria-checked={on}
+                          className={on ? `on ${a.v}` : ""}
+                          onClick={() => answer(s, a.v, s.answer)}
+                        >
                           {a.label}
                         </button>
                       );

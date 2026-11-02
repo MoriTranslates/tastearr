@@ -3,7 +3,10 @@ import { db, transaction } from "./db.js";
 export type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
 export const SEASONS: Season[] = ["WINTER", "SPRING", "SUMMER", "FALL"];
 
-export interface Relation { relationType: string; node: { id: number; type: string; format: string | null } }
+export interface Relation {
+  relationType: string;
+  node: { id: number; type: string; format: string | null };
+}
 
 export interface Media {
   id: number;
@@ -56,7 +59,11 @@ function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
       last = Date.now();
       const res = await fetch(ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": "Tastearr (+https://github.com/MoriTranslates/tastearr)" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "User-Agent": "Tastearr (+https://github.com/MoriTranslates/tastearr)",
+        },
         body: JSON.stringify({ query, variables }),
         signal: AbortSignal.timeout(30_000),
       });
@@ -69,7 +76,13 @@ function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
         continue;
       }
       if (res.status >= 500) throw new Error(`AniList is having trouble right now (HTTP ${res.status}). Try again in a few minutes.`);
-      if (!res.ok) throw new Error(`AniList refused the request (HTTP ${res.status}): ${(await res.text()).replace(/<[^>]+>/g, " ").trim().slice(0, 160)}`);
+      if (!res.ok)
+        throw new Error(
+          `AniList refused the request (HTTP ${res.status}): ${(await res.text())
+            .replace(/<[^>]+>/g, " ")
+            .trim()
+            .slice(0, 160)}`,
+        );
       const body = (await res.json()) as { data: T; errors?: { message: string }[] };
       if (body.errors?.length) throw new Error(`AniList: ${body.errors[0].message}`);
       return body.data;
@@ -110,11 +123,13 @@ export function shiftSeason(s: { season: Season; year: number }, by: number) {
 
 /** Season list from cache, refreshed if stale (current/upcoming: 12 hours, past: 30 days). */
 export async function getSeason(season: Season, year: number, force = false): Promise<Media[]> {
-  const row = db.prepare("SELECT fetched_at FROM season_fetch WHERE season = ? AND year = ?").get(season, year) as { fetched_at: number } | undefined;
+  const row = db.prepare("SELECT fetched_at FROM season_fetch WHERE season = ? AND year = ?").get(season, year) as
+    { fetched_at: number } | undefined;
   const cur = seasonOf();
   const past = year * 4 + SEASONS.indexOf(season) < cur.year * 4 + SEASONS.indexOf(cur.season);
   const maxAge = past ? 30 * 86_400_000 : 12 * 3_600_000;
-  const cached = () => (db.prepare("SELECT data FROM media WHERE season = ? AND year = ?").all(season, year) as { data: string }[]).map((r) => parse(r.data));
+  const cached = () =>
+    (db.prepare("SELECT data FROM media WHERE season = ? AND year = ?").all(season, year) as { data: string }[]).map((r) => parse(r.data));
   if (!force && row && Date.now() - row.fetched_at <= maxAge) {
     const list = cached();
     if (list.every(Boolean)) return list as Media[];
@@ -133,8 +148,13 @@ export async function getSeason(season: Season, year: number, force = false): Pr
   transaction(() => {
     store(unique, season, year);
     // Shows AniList moved out of this season (or deleted) must not keep the old tag, or the cache never validates.
-    if (unique.length) db.prepare(`UPDATE media SET season = NULL, year = NULL WHERE season = ? AND year = ? AND id NOT IN (${unique.map(() => "?").join(",")})`).run(season, year, ...unique.map((m) => m.id));
-    db.prepare("INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at").run(season, year, Date.now());
+    if (unique.length)
+      db.prepare(
+        `UPDATE media SET season = NULL, year = NULL WHERE season = ? AND year = ? AND id NOT IN (${unique.map(() => "?").join(",")})`,
+      ).run(season, year, ...unique.map((m) => m.id));
+    db.prepare(
+      "INSERT INTO season_fetch (season, year, fetched_at) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at",
+    ).run(season, year, Date.now());
   });
   return unique;
 }
@@ -150,9 +170,12 @@ export async function getMediaByIds(ids: number[]): Promise<Media[]> {
   }
   const missing = [...new Set(ids)].filter((id) => !have.has(id));
   for (let i = 0; i < missing.length; i += 50) {
-    const d = await gql<PageResult>(`query ($ids: [Int]) { Page(perPage: 50) { pageInfo { hasNextPage } media(id_in: $ids) { ${FIELDS} } } }`, {
-      ids: missing.slice(i, i + 50),
-    });
+    const d = await gql<PageResult>(
+      `query ($ids: [Int]) { Page(perPage: 50) { pageInfo { hasNextPage } media(id_in: $ids) { ${FIELDS} } } }`,
+      {
+        ids: missing.slice(i, i + 50),
+      },
+    );
     store(d.Page.media, null, null);
     for (const m of d.Page.media) have.set(m.id, m);
   }
@@ -196,23 +219,38 @@ export async function popularIdsBatch(filters: PopularFilter[], perPage = 20) {
       return `p${k}: Page(perPage: ${perPage}) { media(type: ANIME, format_in: [TV, ONA], isAdult: false, countryOfOrigin: "JP", genre_in: $g${k}, tag_in: $t${k},
         source: $s${k}, minimumTagRank: $r${k}, sort: POPULARITY_DESC) { id startDate { year } relations { edges { relationType node { type } } } } }`;
     });
-    const d = await gql<Record<string, { media: { id: number; startDate: { year: number | null } | null; relations: { edges: { relationType: string; node: { type: string } }[] } | null }[] }>>(
-      `query (${decl.join(", ")}) { ${body.join(" ")} }`,
-      vars,
-    );
+    const d = await gql<
+      Record<
+        string,
+        {
+          media: {
+            id: number;
+            startDate: { year: number | null } | null;
+            relations: { edges: { relationType: string; node: { type: string } }[] } | null;
+          }[];
+        }
+      >
+    >(`query (${decl.join(", ")}) { ${body.join(" ")} }`, vars);
     for (let k = 0; k < chunk.length; k++)
       out.push(
         (d[`p${k}`]?.media ?? []).map((m) => ({
           id: m.id,
           year: m.startDate?.year ?? null,
-          firstSeason: !(m.relations?.edges ?? []).some((e) => (e.relationType === "PREQUEL" || e.relationType === "PARENT") && e.node.type === "ANIME"),
+          firstSeason: !(m.relations?.edges ?? []).some(
+            (e) => (e.relationType === "PREQUEL" || e.relationType === "PARENT") && e.node.type === "ANIME",
+          ),
         })),
       );
   }
   return out;
 }
 
-export interface ListEntry { mediaId: number; status: string; score: number; progress: number }
+export interface ListEntry {
+  mediaId: number;
+  status: string;
+  score: number;
+  progress: number;
+}
 
 /** A user's public AniList anime list. */
 export async function anilistUserList(userName: string): Promise<ListEntry[]> {
@@ -228,7 +266,9 @@ export async function airedBetween(ids: number[], from: number, to: number) {
   const out: { mediaId: number; episode: number; airingAt: number }[] = [];
   for (let i = 0; i < ids.length; i += 50) {
     for (let page = 1; page <= 10; page++) {
-      const d = await gql<{ Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: { mediaId: number; episode: number; airingAt: number }[] } }>(
+      const d = await gql<{
+        Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: { mediaId: number; episode: number; airingAt: number }[] };
+      }>(
         `query ($ids: [Int], $from: Int, $to: Int, $page: Int) { Page(page: $page, perPage: 50) { pageInfo { hasNextPage } airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) { mediaId episode airingAt } } }`,
         { ids: ids.slice(i, i + 50), from, to, page },
       );
@@ -242,8 +282,23 @@ export async function airedBetween(ids: number[], from: number, to: number) {
 /** AniList genres with a plain-English hint for people new to anime terms. */
 export function allGenres(): { key: string; label: string }[] {
   return [
-    ["Action", ""], ["Adventure", ""], ["Comedy", ""], ["Drama", ""], ["Ecchi", "fan service, sexy"], ["Fantasy", ""], ["Horror", ""],
-    ["Mahou Shoujo", "magical girls"], ["Mecha", "giant robots"], ["Music", ""], ["Mystery", ""], ["Psychological", ""], ["Romance", ""],
-    ["Sci-Fi", ""], ["Slice of Life", "everyday life"], ["Sports", ""], ["Supernatural", ""], ["Thriller", ""],
+    ["Action", ""],
+    ["Adventure", ""],
+    ["Comedy", ""],
+    ["Drama", ""],
+    ["Ecchi", "fan service, sexy"],
+    ["Fantasy", ""],
+    ["Horror", ""],
+    ["Mahou Shoujo", "magical girls"],
+    ["Mecha", "giant robots"],
+    ["Music", ""],
+    ["Mystery", ""],
+    ["Psychological", ""],
+    ["Romance", ""],
+    ["Sci-Fi", ""],
+    ["Slice of Life", "everyday life"],
+    ["Sports", ""],
+    ["Supernatural", ""],
+    ["Thriller", ""],
   ].map(([key, hint]) => ({ key, label: hint ? `${key} (${hint})` : key }));
 }

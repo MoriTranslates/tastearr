@@ -9,7 +9,9 @@ export function useSettings() {
   const [s, setS] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    api<Settings>("/settings").then(setS).catch((e) => setError(e.message));
+    api<Settings>("/settings")
+      .then(setS)
+      .catch((e) => setError(e.message));
   }, []);
   const save: Save = async (patch) => {
     const next = await api<Settings>("/settings", { method: "PUT", body: patch });
@@ -21,7 +23,14 @@ export function useSettings() {
 
 // ---------------------------------------------------------------- auto-detect
 
-interface Found { id: string; app: "sonarr" | "radarr"; folder: string; port: number; url: string | null; usable: boolean }
+interface Found {
+  id: string;
+  app: "sonarr" | "radarr";
+  folder: string;
+  port: number;
+  url: string | null;
+  usable: boolean;
+}
 
 export function AutoDetect({ onUsed }: { onUsed: () => void }) {
   const toast = useToast();
@@ -56,7 +65,8 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
     <div className="card pad stack">
       <h2>Find my apps</h2>
       <p className="muted small">
-        If Sonarr's or Radarr's config folder is mounted into Tastearr (read-only, at <code>/appdata</code>), Tastearr can read the API key itself. You only confirm the address.
+        If Sonarr's or Radarr's config folder is mounted into Tastearr (read-only, at <code>/appdata</code>), Tastearr can read the API key
+        itself. You only confirm the address.
       </p>
       <button className="ghost" disabled={busy} onClick={scan}>
         {busy ? "Looking…" : "Look for Sonarr and Radarr"}
@@ -69,7 +79,12 @@ export function AutoDetect({ onUsed }: { onUsed: () => void }) {
           <span className="muted small">{f.folder}</span>
           {f.usable ? (
             <>
-              <input aria-label={`${f.folder} address`} value={urls[f.id] ?? ""} placeholder={`http://server-ip:${f.port}`} onChange={(e) => setUrls({ ...urls, [f.id]: e.target.value })} />
+              <input
+                aria-label={`${f.folder} address`}
+                value={urls[f.id] ?? ""}
+                placeholder={`http://server-ip:${f.port}`}
+                onChange={(e) => setUrls({ ...urls, [f.id]: e.target.value })}
+              />
               <button className="primary small" disabled={!urls[f.id]} onClick={() => use(f)}>
                 Use
               </button>
@@ -117,7 +132,10 @@ export function ExtraSonarrCard({ s, onChange }: { s: Settings; onChange: () => 
   return (
     <div className="card pad stack">
       <h2>Other Sonarr instances</h2>
-      <p className="muted small">Running a separate anime or 4K Sonarr? Add it so shows there count as "You have this" and can be monitored. New shows are added to the main Sonarr above.</p>
+      <p className="muted small">
+        Running a separate anime or 4K Sonarr? Add it so shows there count as "You have this" and can be monitored. New shows are added to
+        the main Sonarr above.
+      </p>
       {s.sonarrExtra.map((x, i) => (
         <div key={x.url} className="row">
           <strong>{x.name}</strong>
@@ -220,13 +238,15 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
     <div className="card pad stack">
       <div className="card-head">
         <h2>{name}</h2>
-        <Pill ok={version ? true : failed || !connected ? false : null}>{version ? `Connected · v${version}` : failed ? "Can't connect" : connected ? "Saved" : "Not set up"}</Pill>
+        <Pill ok={version ? true : failed || !connected ? false : null}>
+          {version ? `Connected · v${version}` : failed ? "Can't connect" : connected ? "Saved" : "Not set up"}
+        </Pill>
       </div>
       <p className="muted small">
         {kind === "sonarr" ? (
           <>
-            Tastearr reads your series list to learn what you picked, and adds anime you choose. It only changes Sonarr when you press <em>Add</em>, <em>Monitor</em> or{" "}
-            <em>Not into it</em>, and it never deletes anything.
+            Tastearr reads your series list to learn what you picked, and adds anime you choose. It only changes Sonarr when you press{" "}
+            <em>Add</em>, <em>Monitor</em> or <em>Not into it</em>, and it never deletes anything.
           </>
         ) : (
           <>Same as Sonarr, for anime movies: Tastearr reads your movie list and adds the movies you pick. It never deletes anything.</>
@@ -235,7 +255,11 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
       <div className="form">
         <label>
           Address
-          <input value={url} placeholder={kind === "sonarr" ? "http://192.168.1.10:8989" : "http://192.168.1.10:7878"} onChange={(e) => setUrl(e.target.value)} />
+          <input
+            value={url}
+            placeholder={kind === "sonarr" ? "http://192.168.1.10:8989" : "http://192.168.1.10:7878"}
+            onChange={(e) => setUrl(e.target.value)}
+          />
         </label>
         <label>
           API key <span className="muted small">(Settings → General in {name})</span>
@@ -251,7 +275,10 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
         <div className="form">
           <label>
             Quality profile for {kind === "sonarr" ? "anime" : "anime movies"}
-            <select value={draft.qualityProfileId ?? ""} onChange={(e) => setDraft({ ...draft, qualityProfileId: Number(e.target.value) || null })}>
+            <select
+              value={draft.qualityProfileId ?? ""}
+              onChange={(e) => setDraft({ ...draft, qualityProfileId: Number(e.target.value) || null })}
+            >
               <option value="">Choose…</option>
               {opts.profiles.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -273,20 +300,31 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
           </label>
           <div className="field wide">
             <span>Tags to add (a "tastearr" tag is always added too)</span>
-            <Chips label="Tags" options={opts.tags.map((t) => ({ id: t.id, label: t.label }))} value={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
+            <Chips
+              label="Tags"
+              options={opts.tags.map((t) => ({ id: t.id, label: t.label }))}
+              value={draft.tags}
+              onChange={(tags) => setDraft({ ...draft, tags })}
+            />
           </div>
           {kind === "sonarr" && "sequelMonitor" in draft && (
             <>
               <label>
                 Sequels of shows you don't have
-                <select value={draft.sequelMonitor} onChange={(e) => setDraft({ ...draft, sequelMonitor: e.target.value as "newSeason" | "all" })}>
+                <select
+                  value={draft.sequelMonitor}
+                  onChange={(e) => setDraft({ ...draft, sequelMonitor: e.target.value as "newSeason" | "all" })}
+                >
                   <option value="newSeason">Only monitor the new season</option>
                   <option value="all">Monitor every season</option>
                 </select>
               </label>
               <label>
                 "Not into it anymore"
-                <select value={draft.dropAction} onChange={(e) => setDraft({ ...draft, dropAction: e.target.value as "unmonitor" | "keep" })}>
+                <select
+                  value={draft.dropAction}
+                  onChange={(e) => setDraft({ ...draft, dropAction: e.target.value as "unmonitor" | "keep" })}
+                >
                   <option value="unmonitor">Unmonitor the series in Sonarr</option>
                   <option value="keep">Only stop alerts</option>
                 </select>
@@ -296,7 +334,10 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
           {kind === "radarr" && "minimumAvailability" in draft && (
             <label>
               Minimum availability
-              <select value={draft.minimumAvailability} onChange={(e) => setDraft({ ...draft, minimumAvailability: e.target.value as "announced" | "inCinemas" | "released" })}>
+              <select
+                value={draft.minimumAvailability}
+                onChange={(e) => setDraft({ ...draft, minimumAvailability: e.target.value as "announced" | "inCinemas" | "released" })}
+              >
                 <option value="released">Released</option>
                 <option value="inCinemas">In cinemas</option>
                 <option value="announced">Announced</option>
@@ -304,7 +345,8 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
             </label>
           )}
           <label className="check">
-            <input type="checkbox" checked={draft.searchOnAdd} onChange={(e) => setDraft({ ...draft, searchOnAdd: e.target.checked })} /> Search as soon as it's added
+            <input type="checkbox" checked={draft.searchOnAdd} onChange={(e) => setDraft({ ...draft, searchOnAdd: e.target.checked })} />{" "}
+            Search as soon as it's added
           </label>
         </div>
       )}
@@ -319,7 +361,12 @@ export function ArrCard({ kind, s, save, onSaved }: { kind: "sonarr" | "radarr";
 
 // ---------------------------------------------------------------- Plex / Jellyfin
 
-interface PlexServer { id: string; name: string; owned: boolean; urls: string[] }
+interface PlexServer {
+  id: string;
+  name: string;
+  owned: boolean;
+  urls: string[];
+}
 
 export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSaved?: () => void }) {
   const toast = useToast();
@@ -354,7 +401,12 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
   async function test(quiet = false) {
     setBusy(true);
     try {
-      const r = await api<{ name: string; version: string; users: { id: string; name: string }[]; libraries: { id: string; title: string }[] }>("/media/test", { body: { type, url, token, userId } });
+      const r = await api<{
+        name: string;
+        version: string;
+        users: { id: string; name: string }[];
+        libraries: { id: string; title: string }[];
+      }>("/media/test", { body: { type, url, token, userId } });
       setInfo(`${r.name} · v${r.version}`);
       setFailed(false);
       setUsers(r.users);
@@ -407,7 +459,9 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
     if (!plex) return;
     setBusy(true);
     try {
-      const r = await api<{ name: string; version: string; libraries: { id: string; title: string }[] }>("/plex/server", { body: { pinId: plex.pinId, serverId: serverPick.id, url: serverPick.url } });
+      const r = await api<{ name: string; version: string; libraries: { id: string; title: string }[] }>("/plex/server", {
+        body: { pinId: plex.pinId, serverId: serverPick.id, url: serverPick.url },
+      });
       setInfo(`${r.name} · v${r.version}`);
       setLibs(r.libraries);
       setType("plex");
@@ -441,11 +495,14 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
     <div className="card pad stack">
       <div className="card-head">
         <h2>Watch history</h2>
-        <Pill ok={info ? true : failed || m.type === "none" ? false : null}>{info ?? (failed ? "Can't connect" : m.type === "none" ? "Not set up" : "Saved")}</Pill>
+        <Pill ok={info ? true : failed || m.type === "none" ? false : null}>
+          {info ?? (failed ? "Can't connect" : m.type === "none" ? "Not set up" : "Saved")}
+        </Pill>
       </div>
       <p className="muted small">
-        <strong>Read-only.</strong> Tastearr reads how many episodes you've watched of each show. Finished shows count strongly toward your taste and shows you dropped early count
-        against it. It never changes anything on your media server. Skip this if you'd rather use AniList/MAL or the quiz.
+        <strong>Read-only.</strong> Tastearr reads how many episodes you've watched of each show. Finished shows count strongly toward your
+        taste and shows you dropped early count against it. It never changes anything on your media server. Skip this if you'd rather use
+        AniList/MAL or the quiz.
       </p>
       <div className="seg" role="radiogroup" aria-label="Media server">
         {(["none", "plex", "jellyfin"] as const).map((t) => (
@@ -472,7 +529,10 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
               {manual ? "Hide" : "Enter address and token instead"}
             </button>
           </div>
-          <p className="muted small">Signing in gives Tastearr its own access, which you can remove any time in Plex → Authorized Devices. Your Plex password never touches Tastearr.</p>
+          <p className="muted small">
+            Signing in gives Tastearr its own access, which you can remove any time in Plex → Authorized Devices. Your Plex password never
+            touches Tastearr.
+          </p>
           {plex && !plex.servers && (
             <p className="muted small">
               Waiting for you to approve in the Plex window…{" "}
@@ -508,7 +568,12 @@ export function MediaCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
             <div className="form">
               <label>
                 Server
-                <select value={serverPick.id} onChange={(e) => setServerPick({ id: e.target.value, url: plex.servers!.find((x) => x.id === e.target.value)?.urls[0] ?? "" })}>
+                <select
+                  value={serverPick.id}
+                  onChange={(e) =>
+                    setServerPick({ id: e.target.value, url: plex.servers!.find((x) => x.id === e.target.value)?.urls[0] ?? "" })
+                  }
+                >
                   {plex.servers.map((x) => (
                     <option key={x.id} value={x.id}>
                       {x.name}
@@ -604,7 +669,9 @@ export function ListsCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
     <div className="card pad stack">
       <div className="card-head">
         <h2>AniList / MyAnimeList</h2>
-        <Pill ok={s.lists.anilistUser || s.lists.malUser ? true : false}>{s.lists.anilistUser || s.lists.malUser ? "Linked" : "Not set up"}</Pill>
+        <Pill ok={s.lists.anilistUser || s.lists.malUser ? true : false}>
+          {s.lists.anilistUser || s.lists.malUser ? "Linked" : "Not set up"}
+        </Pill>
       </div>
       <p className="muted small">
         The fastest way to teach Tastearr: your public list's completed shows, scores and drops. Only the username is needed for AniList.
@@ -612,7 +679,11 @@ export function ListsCard({ s, save, onSaved }: { s: Settings; save: Save; onSav
       <div className="form">
         <label>
           AniList username
-          <input value={lists.anilistUser} placeholder="e.g. morisato" onChange={(e) => setLists({ ...lists, anilistUser: e.target.value })} />
+          <input
+            value={lists.anilistUser}
+            placeholder="e.g. morisato"
+            onChange={(e) => setLists({ ...lists, anilistUser: e.target.value })}
+          />
         </label>
         <label>
           MyAnimeList username
@@ -665,32 +736,53 @@ export function AlertsCard({ s, save, simple }: { s: Settings; save: Save; simpl
     }
   }
 
-  const copy = (text: string) => navigator.clipboard?.writeText(text).then(() => toast("Copied"), () => toast("Couldn't copy, select it and copy by hand", true));
+  const copy = (text: string) =>
+    navigator.clipboard?.writeText(text).then(
+      () => toast("Copied"),
+      () => toast("Couldn't copy, select it and copy by hand", true),
+    );
   return (
     <div className="card pad stack">
       <h2>Phone alerts</h2>
       <ol className="howto-steps small">
         <li>
-          Install the free <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app on your phone.
+          Install the free{" "}
+          <a href="https://ntfy.sh" target="_blank" rel="noreferrer">
+            ntfy
+          </a>{" "}
+          app on your phone.
         </li>
-        <li>In the app, tap + and subscribe to a made-up name only you'd guess, like <code>{example}</code>.</li>
+        <li>
+          In the app, tap + and subscribe to a made-up name only you'd guess, like <code>{example}</code>.
+        </li>
         <li>Type the same name below, then press "Save & send test".</li>
       </ol>
       <div className="form">
         <label>
           ntfy topic name
           {/* Topics are case-sensitive: phones must not capitalise or "correct" them. */}
-          <input value={n.ntfyUrl} placeholder={example} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" onChange={(e) => setN({ ...n, ntfyUrl: e.target.value })} />
+          <input
+            value={n.ntfyUrl}
+            placeholder={example}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setN({ ...n, ntfyUrl: e.target.value })}
+          />
         </label>
         <label className="check">
-          <input type="checkbox" checked={n.airingAlerts} onChange={(e) => setN({ ...n, airingAlerts: e.target.checked })} /> When a show I follow has a new episode
+          <input type="checkbox" checked={n.airingAlerts} onChange={(e) => setN({ ...n, airingAlerts: e.target.checked })} /> When a show I
+          follow has a new episode
         </label>
         <label className="check">
-          <input type="checkbox" checked={n.seasonAlerts} onChange={(e) => setN({ ...n, seasonAlerts: e.target.checked })} /> When next season's picks are ready
+          <input type="checkbox" checked={n.seasonAlerts} onChange={(e) => setN({ ...n, seasonAlerts: e.target.checked })} /> When next
+          season's picks are ready
         </label>
         {server && (
           <label className="check">
-            <input type="checkbox" checked={n.episodeAlerts} onChange={(e) => setN({ ...n, episodeAlerts: e.target.checked })} /> When Sonarr/Radarr finishes downloading
+            <input type="checkbox" checked={n.episodeAlerts} onChange={(e) => setN({ ...n, episodeAlerts: e.target.checked })} /> When
+            Sonarr/Radarr finishes downloading
           </label>
         )}
       </div>
@@ -727,7 +819,13 @@ export function AlertsCard({ s, save, simple }: { s: Settings; save: Save; simpl
               </label>
               <label>
                 Wait this many minutes after it airs in Japan before saying an episode is out
-                <NumberInput label="Minutes to wait" min={0} max={1440} value={n.airingDelayMin} onChange={(v) => setN({ ...n, airingDelayMin: v })} />
+                <NumberInput
+                  label="Minutes to wait"
+                  min={0}
+                  max={1440}
+                  value={n.airingDelayMin}
+                  onChange={(v) => setN({ ...n, airingDelayMin: v })}
+                />
               </label>
               <label>
                 Shows in the new-season alert

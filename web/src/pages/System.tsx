@@ -11,7 +11,10 @@ export function System() {
 
   useEffect(() => {
     let alive = true;
-    const load = () => api<{ version: string; uptime: number; node: string; jobs: Job[] }>("/system").then((x) => alive && setInfo(x)).catch((e) => toast(e.message, true));
+    const load = () =>
+      api<{ version: string; uptime: number; node: string; jobs: Job[] }>("/system")
+        .then((x) => alive && setInfo(x))
+        .catch((e) => toast(e.message, true));
     load();
     const t = setInterval(load, 3000);
     return () => {
@@ -23,7 +26,9 @@ export function System() {
   const [health, setHealth] = useState<{ checks: { name: string; ok: boolean; detail: string }[] } | null>(null);
   const checkHealth = () => {
     setHealth(null);
-    api<NonNullable<typeof health>>("/system/health").then(setHealth).catch((e) => toast(e.message, true));
+    api<NonNullable<typeof health>>("/system/health")
+      .then(setHealth)
+      .catch((e) => toast(e.message, true));
   };
   useEffect(checkHealth, [toast]);
 
@@ -34,7 +39,11 @@ export function System() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch("/api/system/backup", { method: "POST", headers: { "X-Tastearr": "1", "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      const res = await fetch("/api/system/backup", {
+        method: "POST",
+        headers: { "X-Tastearr": "1", "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
       if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.statusText);
       const url = URL.createObjectURL(await res.blob());
       const a = document.createElement("a");
@@ -88,11 +97,18 @@ export function System() {
       <div className="card pad stack">
         <h2>Backup</h2>
         <p className="muted small">
-          Downloads Tastearr's database: settings, keys, your ratings and taste data. Keep it private; it holds your API keys. To restore, stop the container and put the file in your
-          config folder as <code>tastearr.db</code>.
+          Downloads Tastearr's database: settings, keys, your ratings and taste data. Keep it private; it holds your API keys. To restore,
+          stop the container and put the file in your config folder as <code>tastearr.db</code>.
         </p>
         <form className="row" onSubmit={backup}>
-          <input type="password" aria-label="Your password" placeholder="Your password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <input
+            type="password"
+            aria-label="Your password"
+            placeholder="Your password"
+            autoComplete="current-password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+          />
           <button className="ghost" disabled={!pw || saving}>
             {saving ? "Preparing…" : "Download backup"}
           </button>

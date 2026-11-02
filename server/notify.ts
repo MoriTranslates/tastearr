@@ -21,7 +21,15 @@ async function check(res: Response, who: string) {
 async function sendDiscord(webhook: string, m: Message) {
   checkOutbound(webhook, "The Discord webhook");
   const embed = { title: m.title, description: m.body, url: m.url, color: 0x8b5cf6, thumbnail: m.image ? { url: m.image } : undefined };
-  await check(await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Tastearr", embeds: [embed] }), signal: AbortSignal.timeout(20_000) }), "Discord");
+  await check(
+    await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "Tastearr", embeds: [embed] }),
+      signal: AbortSignal.timeout(20_000),
+    }),
+    "Discord",
+  );
 }
 
 /**
@@ -60,7 +68,12 @@ async function sendGotify(url: string, token: string, m: Message) {
     extras: { "client::notification": { click: m.url ? { url: m.url } : undefined, bigImageUrl: m.image ?? undefined } },
   };
   await check(
-    await fetch(`${url.replace(/\/+$/, "")}/message`, { method: "POST", headers: { "Content-Type": "application/json", "X-Gotify-Key": token }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }),
+    await fetch(`${url.replace(/\/+$/, "")}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Gotify-Key": token },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
+    }),
     "Gotify",
   );
 }

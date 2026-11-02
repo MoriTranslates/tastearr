@@ -15,16 +15,30 @@ export function Shows({ status }: { status: Status }) {
 
   useEffect(() => {
     setError(null);
-    api<{ sonarr: Show[]; following: Followed[] }>("/shows").then(setData).catch((e) => setError(e.message));
+    api<{ sonarr: Show[]; following: Followed[] }>("/shows")
+      .then(setData)
+      .catch((e) => setError(e.message));
   }, [reload]);
 
   async function toggle(s: Show) {
-    const sonarrPart = status.prefs?.dropAction === "keep" ? " Sonarr keeps downloading it." : " Sonarr stops monitoring it (nothing is deleted).";
-    if (!s.dropped && !confirm(`Not into ${s.title} any more? Tastearr stops alerts for it and learns from this.${status.sonarr ? sonarrPart : ""} You can turn it back on later.`)) return;
+    const sonarrPart =
+      status.prefs?.dropAction === "keep" ? " Sonarr keeps downloading it." : " Sonarr stops monitoring it (nothing is deleted).";
+    if (
+      !s.dropped &&
+      !confirm(
+        `Not into ${s.title} any more? Tastearr stops alerts for it and learns from this.${status.sonarr ? sonarrPart : ""} You can turn it back on later.`,
+      )
+    )
+      return;
     setBusy(s.tvdbId);
     try {
-      const r = await api<{ dropped: boolean; monitored: boolean | null }>(`/shows/${s.tvdbId}/${s.dropped ? "undrop" : "drop"}`, { body: {} });
-      setData((d) => d && { ...d, sonarr: d.sonarr.map((x) => (x.tvdbId === s.tvdbId ? { ...x, dropped: r.dropped, monitored: r.monitored } : x)) });
+      const r = await api<{ dropped: boolean; monitored: boolean | null }>(`/shows/${s.tvdbId}/${s.dropped ? "undrop" : "drop"}`, {
+        body: {},
+      });
+      setData(
+        (d) =>
+          d && { ...d, sonarr: d.sonarr.map((x) => (x.tvdbId === s.tvdbId ? { ...x, dropped: r.dropped, monitored: r.monitored } : x)) },
+      );
       toast(r.dropped ? `Dropped ${s.title}. No more alerts for it.` : `${s.title} is back on`);
     } catch (e) {
       toast((e as Error).message, true);
@@ -60,12 +74,24 @@ export function Shows({ status }: { status: Status }) {
     <section>
       <div className="toolbar">
         <h1>My shows</h1>
-        {data.sonarr.length + data.following.length > 6 && <input className="search" type="search" placeholder="Search my shows" aria-label="Search my shows" value={q} onChange={(e) => setQ(e.target.value)} />}
+        {data.sonarr.length + data.following.length > 6 && (
+          <input
+            className="search"
+            type="search"
+            placeholder="Search my shows"
+            aria-label="Search my shows"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        )}
       </div>
       {status.sonarr && (
         <>
           <h2>Airing now, in Sonarr</h2>
-          <p className="muted small">Lost interest? "Not into it" stops alerts for the show and teaches Tastearr. Settings decides whether Sonarr also stops downloading it.</p>
+          <p className="muted small">
+            Lost interest? "Not into it" stops alerts for the show and teaches Tastearr. Settings decides whether Sonarr also stops
+            downloading it.
+          </p>
           {!sonarr.length && <p className="muted">{q ? "No matches." : "No airing anime in Sonarr."}</p>}
           <div className="show-list">
             {sonarr.map((s) => (
@@ -74,17 +100,32 @@ export function Shows({ status }: { status: Status }) {
                 <div className="body">
                   <h3>{s.title}</h3>
                   <p className="meta">
-                    {[s.dropped ? "Dropped" : s.nextAiring && `Next: ${airLabel(Date.parse(s.nextAiring))}`, `${s.downloaded} downloaded`, s.watched !== null && `${s.watched}/${s.total} watched`]
+                    {[
+                      s.dropped ? "Dropped" : s.nextAiring && `Next: ${airLabel(Date.parse(s.nextAiring))}`,
+                      `${s.downloaded} downloaded`,
+                      s.watched !== null && `${s.watched}/${s.total} watched`,
+                    ]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
                   {s.watched !== null && s.total ? (
-                    <div className="bar thin" role="meter" aria-label="Watched" aria-valuemin={0} aria-valuemax={s.total} aria-valuenow={s.watched}>
+                    <div
+                      className="bar thin"
+                      role="meter"
+                      aria-label="Watched"
+                      aria-valuemin={0}
+                      aria-valuemax={s.total}
+                      aria-valuenow={s.watched}
+                    >
                       <div style={{ width: `${Math.min(100, (s.watched / s.total) * 100)}%` }} />
                     </div>
                   ) : null}
                 </div>
-                <button className={s.dropped ? "ghost small" : "ghost small danger-text"} disabled={busy === s.tvdbId} onClick={() => toggle(s)}>
+                <button
+                  className={s.dropped ? "ghost small" : "ghost small danger-text"}
+                  disabled={busy === s.tvdbId}
+                  onClick={() => toggle(s)}
+                >
                   {s.dropped ? "Turn back on" : "Not into it"}
                 </button>
               </div>
@@ -96,7 +137,13 @@ export function Shows({ status }: { status: Status }) {
       <h2>Following</h2>
       <p className="muted small">
         Shows you follow from Picks.{" "}
-        {status.alerts ? "You get an alert when each episode airs, with where to stream it." : <>Set up alerts in <Link to="/settings">Settings</Link> to get a ping when each episode airs.</>}
+        {status.alerts ? (
+          "You get an alert when each episode airs, with where to stream it."
+        ) : (
+          <>
+            Set up alerts in <Link to="/settings">Settings</Link> to get a ping when each episode airs.
+          </>
+        )}
       </p>
       {!following.length && <p className="muted">{q ? "No matches." : "Not following anything yet. Press Follow on a pick."}</p>}
       <div className="show-list">
@@ -109,7 +156,13 @@ export function Shows({ status }: { status: Status }) {
                   {f.title}
                 </a>
               </h3>
-              <p className="meta">{f.nextAiring ? `Ep ${f.nextAiring.episode} · ${airLabel(f.nextAiring.at)}` : f.status === "FINISHED" ? "Finished" : "No air date yet"}</p>
+              <p className="meta">
+                {f.nextAiring
+                  ? `Ep ${f.nextAiring.episode} · ${airLabel(f.nextAiring.at)}`
+                  : f.status === "FINISHED"
+                    ? "Finished"
+                    : "No air date yet"}
+              </p>
               <div className="chips">
                 {f.streaming.map((s) => (
                   <a key={s.site + s.url} className="chip link" href={s.url} target="_blank" rel="noreferrer">

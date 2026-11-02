@@ -64,14 +64,20 @@ async function buildPool() {
   ARCHETYPES.forEach((a, i) => {
     const first = lists[i].filter((x) => x.firstSeason && !used.has(x.id));
     const older = first.find((x) => x.year !== null && x.year < OLD_BEFORE);
-    for (const x of [...new Map([older, ...first].filter((y): y is (typeof first)[number] => !!y).map((y) => [y.id, y])).values()].slice(0, PER_ARCHETYPE + 1)) {
+    for (const x of [...new Map([older, ...first].filter((y): y is (typeof first)[number] => !!y).map((y) => [y.id, y])).values()].slice(
+      0,
+      PER_ARCHETYPE + 1,
+    )) {
       used.add(x.id);
       chosen.push({ id: x.id, archetype: a.label });
     }
   });
   const media = new Map((await getMediaByIds(chosen.map((c) => c.id))).map((m) => [m.id, m]));
   pool = { at: Date.now(), shows: chosen.filter((c) => media.has(c.id)).map((c) => ({ m: media.get(c.id)!, archetype: c.archetype })) };
-  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(POOL_KEY, JSON.stringify({ at: pool.at, shows: chosen }));
+  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
+    POOL_KEY,
+    JSON.stringify({ at: pool.at, shows: chosen }),
+  );
 }
 
 async function loadPool() {
@@ -81,7 +87,10 @@ async function loadPool() {
     const saved = JSON.parse(row.value) as { at: number; shows: { id: number; archetype: string }[] };
     if (Date.now() - saved.at < 30 * 86_400_000) {
       const media = new Map((await getMediaByIds(saved.shows.map((c) => c.id))).map((m) => [m.id, m]));
-      pool = { at: saved.at, shows: saved.shows.filter((c) => media.has(c.id)).map((c) => ({ m: media.get(c.id)!, archetype: c.archetype })) };
+      pool = {
+        at: saved.at,
+        shows: saved.shows.filter((c) => media.has(c.id)).map((c) => ({ m: media.get(c.id)!, archetype: c.archetype })),
+      };
       return;
     }
   }
@@ -96,7 +105,11 @@ export function prewarmQuiz() {
 
 export async function getQuiz() {
   await loadPool();
-  const answers = new Map((db.prepare("SELECT anilist_id, verdict FROM feedback WHERE source = 'quiz'").all() as { anilist_id: number; verdict: string }[]).map((r) => [r.anilist_id, r.verdict]));
+  const answers = new Map(
+    (db.prepare("SELECT anilist_id, verdict FROM feedback WHERE source = 'quiz'").all() as { anilist_id: number; verdict: string }[]).map(
+      (r) => [r.anilist_id, r.verdict],
+    ),
+  );
   // Shows the user added themselves with "Add a show you've seen" come first.
   const inPool = new Set(pool!.shows.map((x) => x.m.id));
   const added = (await getMediaByIds([...answers.keys()].filter((id) => !inPool.has(id)))).map((m) => ({ m, archetype: "Added by you" }));

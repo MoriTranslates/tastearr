@@ -1,5 +1,9 @@
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public data?: Record<string, unknown>) {
+  constructor(
+    message: string,
+    public status: number,
+    public data?: Record<string, unknown>,
+  ) {
     super(message);
   }
 }
@@ -133,11 +137,24 @@ export interface Followed {
   streaming: { site: string; url: string }[];
 }
 
-export interface Job { name: string; state: "running" | "done" | "error"; detail: string; startedAt: number | null; finishedAt: number | null }
+export interface Job {
+  name: string;
+  state: "running" | "done" | "error";
+  detail: string;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
 
 export type Pref = "love" | "ok" | "never";
 
-export interface ArrSettings { url: string; apiKey: string; qualityProfileId: number | null; rootFolderPath: string; tags: number[]; searchOnAdd: boolean }
+export interface ArrSettings {
+  url: string;
+  apiKey: string;
+  qualityProfileId: number | null;
+  rootFolderPath: string;
+  tags: number[];
+  searchOnAdd: boolean;
+}
 
 export interface Settings {
   sonarr: ArrSettings & { sequelMonitor: "newSeason" | "all"; dropAction: "unmonitor" | "keep" };
@@ -148,10 +165,29 @@ export interface Settings {
   filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
   display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
   sonarrExtra: { name: string; url: string; apiKey: string }[];
-  autoAdd: { enabled: boolean; minMatch: number; newShows: boolean; sequels: boolean; movies: boolean; maxPerSeason: number; search: boolean };
+  autoAdd: {
+    enabled: boolean;
+    minMatch: number;
+    newShows: boolean;
+    sequels: boolean;
+    movies: boolean;
+    maxPerSeason: number;
+    search: boolean;
+  };
   mode: "server" | "stream" | "";
   genrePrefs: Record<string, Pref>;
-  notify: { discordWebhook: string; ntfyUrl: string; ntfyToken: string; gotifyUrl: string; gotifyToken: string; picks: number; seasonAlerts: boolean; episodeAlerts: boolean; airingAlerts: boolean; airingDelayMin: number };
+  notify: {
+    discordWebhook: string;
+    ntfyUrl: string;
+    ntfyToken: string;
+    gotifyUrl: string;
+    gotifyToken: string;
+    picks: number;
+    seasonAlerts: boolean;
+    episodeAlerts: boolean;
+    airingAlerts: boolean;
+    airingDelayMin: number;
+  };
   externalUrl: string;
   auth: { username: string; hasPassword: boolean; bypassLocal: boolean };
   webhookKey: string;
@@ -177,9 +213,22 @@ export interface AddPlan {
   minimumAvailability?: string;
 }
 
-export interface Candidate { tvdbId: number; title: string; year: number | null; network: string | null; seasons: number[]; overview: string | null; inLibrary: boolean; confident: boolean }
+export interface Candidate {
+  tvdbId: number;
+  title: string;
+  year: number | null;
+  network: string | null;
+  seasons: number[];
+  overview: string | null;
+  inLibrary: boolean;
+  confident: boolean;
+}
 
-export interface ArrOptions { profiles: { id: number; name: string }[]; roots: { id: number; path: string }[]; tags: { id: number; label: string }[] }
+export interface ArrOptions {
+  profiles: { id: number; name: string }[];
+  roots: { id: number; path: string }[];
+  tags: { id: number; label: string }[];
+}
 
 export const SEASONS: Season[] = ["WINTER", "SPRING", "SUMMER", "FALL"];
 export const seasonName = (s: Season) => s[0] + s.slice(1).toLowerCase();

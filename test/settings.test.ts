@@ -1,7 +1,17 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkPassword, getSettings, isMasked, MASK, patchSettings, publicSettings, safeEqual, setAccount, updateSettings } from "../server/settings.js";
+import {
+  checkPassword,
+  getSettings,
+  isMasked,
+  MASK,
+  patchSettings,
+  publicSettings,
+  safeEqual,
+  setAccount,
+  updateSettings,
+} from "../server/settings.js";
 
 const secrets = () =>
   patchSettings((s) => ({
@@ -9,7 +19,14 @@ const secrets = () =>
     sonarr: { ...s.sonarr, url: "http://192.168.1.10:8989", apiKey: "fake-sonarr" },
     radarr: { ...s.radarr, url: "http://192.168.1.10:7878", apiKey: "fake-radarr" },
     media: { ...s.media, type: "plex", url: "http://192.168.1.10:32400", token: "fake-plex" },
-    notify: { ...s.notify, discordWebhook: "https://discord.com/api/webhooks/1/fake-hook", ntfyUrl: "https://ntfy.sh/topic", ntfyToken: "fake-ntfy", gotifyUrl: "http://gotify.lan", gotifyToken: "fake-gotify" },
+    notify: {
+      ...s.notify,
+      discordWebhook: "https://discord.com/api/webhooks/1/fake-hook",
+      ntfyUrl: "https://ntfy.sh/topic",
+      ntfyToken: "fake-ntfy",
+      gotifyUrl: "http://gotify.lan",
+      gotifyToken: "fake-gotify",
+    },
     lists: { ...s.lists, malClientId: "fake-mal" },
     sonarrExtra: [{ name: "4K", url: "http://192.168.1.11:8989", apiKey: "fake-extra" }],
   }));
@@ -28,7 +45,20 @@ test("publicSettings never sends a secret, hash or signing key to the browser", 
   const p = publicSettings() as Record<string, any>;
   const text = JSON.stringify(p);
   const s = getSettings();
-  for (const v of ["fake-sonarr", "fake-radarr", "fake-plex", "fake-hook", "fake-ntfy", "fake-gotify", "fake-mal", "fake-extra", s.secret, s.apiKey, s.auth.passwordHash, s.plexClientId])
+  for (const v of [
+    "fake-sonarr",
+    "fake-radarr",
+    "fake-plex",
+    "fake-hook",
+    "fake-ntfy",
+    "fake-gotify",
+    "fake-mal",
+    "fake-extra",
+    s.secret,
+    s.apiKey,
+    s.auth.passwordHash,
+    s.plexClientId,
+  ])
     assert.ok(!text.includes(v), `leaked ${v.slice(0, 8)}`);
   assert.equal(p.sonarr.apiKey, MASK);
   assert.equal(p.notify.discordWebhook, MASK);
@@ -41,7 +71,14 @@ test("publicSettings never sends a secret, hash or signing key to the browser", 
 
 test("updateSettings ignores fields that aren't editable from the browser", () => {
   const before = getSettings();
-  updateSettings({ apiKey: "x", secret: "y", webhookKey: "z", auth: { username: "attacker", passwordHash: "", bypassLocal: true }, sonarrExtra: [], nonsense: 1 });
+  updateSettings({
+    apiKey: "x",
+    secret: "y",
+    webhookKey: "z",
+    auth: { username: "attacker", passwordHash: "", bypassLocal: true },
+    sonarrExtra: [],
+    nonsense: 1,
+  });
   const after = getSettings();
   assert.equal(after.apiKey, before.apiKey);
   assert.equal(after.secret, before.secret);
@@ -52,7 +89,13 @@ test("updateSettings ignores fields that aren't editable from the browser", () =
 });
 
 test("updateSettings coerces types, enums and ranges", () => {
-  updateSettings({ notify: { picks: 999, airingDelayMin: -5 }, display: { titleLanguage: "klingon" }, training: { seasons: "4" }, autoAdd: { enabled: "yes" }, sonarr: { qualityProfileId: "7", tags: ["3", "x", 5] } });
+  updateSettings({
+    notify: { picks: 999, airingDelayMin: -5 },
+    display: { titleLanguage: "klingon" },
+    training: { seasons: "4" },
+    autoAdd: { enabled: "yes" },
+    sonarr: { qualityProfileId: "7", tags: ["3", "x", 5] },
+  });
   const s = getSettings();
   assert.equal(s.notify.picks, 30);
   assert.equal(s.notify.airingDelayMin, 0);
@@ -85,7 +128,11 @@ test("addresses Tastearr will call are checked when they change", () => {
     { notify: { ntfyUrl: "http://169.254.169.254/topic" } },
     { externalUrl: "javascript:alert(1)" },
   ])
-    assert.throws(() => updateSettings(patch), (e: Error & { statusCode?: number }) => e.statusCode === 400, JSON.stringify(patch));
+    assert.throws(
+      () => updateSettings(patch),
+      (e: Error & { statusCode?: number }) => e.statusCode === 400,
+      JSON.stringify(patch),
+    );
   assert.equal(getSettings().sonarr.url, "http://192.168.1.99:8989", "nothing was saved");
   updateSettings({ radarr: { url: "http://radarr:7878" }, externalUrl: "https://tastearr.example.com/" });
   assert.equal(getSettings().radarr.url, "http://radarr:7878");

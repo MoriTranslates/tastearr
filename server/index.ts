@@ -37,7 +37,8 @@ const timers = [
   setInterval(() => void announceAired().catch((e) => app.log.warn(`Airing alerts failed: ${(e as Error).message}`)), 30 * 60_000),
 ];
 // A new install with nothing connected will start with the quiz: have it ready.
-if (!getSettings().sonarr.url && !getSettings().lists.anilistUser && Object.keys(getSettings().genrePrefs).length === 0) timers.push(setTimeout(prewarmQuiz, 3_000));
+if (!getSettings().sonarr.url && !getSettings().lists.anilistUser && Object.keys(getSettings().genrePrefs).length === 0)
+  timers.push(setTimeout(prewarmQuiz, 3_000));
 
 /**
  * `docker stop` / an Unraid update sends SIGTERM. Node running as PID 1 ignores it by default, so the container was
@@ -64,4 +65,6 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 await app.listen({ host: "0.0.0.0", port: PORT });
 if (!getSettings().auth.passwordHash)
-  app.log.warn(`No account yet. Open Tastearr from your home network to create one, or use setup code ${SETUP_TOKEN} from elsewhere (one-time, changes on restart, safe to redact from shared logs).`);
+  app.log.warn(
+    `No account yet. Open Tastearr from your home network to create one, or use setup code ${SETUP_TOKEN} from elsewhere (one-time, changes on restart, safe to redact from shared logs).`,
+  );

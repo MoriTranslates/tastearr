@@ -13,7 +13,13 @@ blocked.addSubnet("fe80::", 10, "ipv6");
 blocked.addSubnet("fd00:ec2::", 32, "ipv6"); // AWS IPv6 metadata (fd00:ec2::254)
 blocked.addAddress("::", "ipv6");
 
-const BLOCKED_NAMES = new Set(["metadata.google.internal", "metadata", "metadata.azure.com", "instance-data", "instance-data.ec2.internal"]);
+const BLOCKED_NAMES = new Set([
+  "metadata.google.internal",
+  "metadata",
+  "metadata.azure.com",
+  "instance-data",
+  "instance-data.ec2.internal",
+]);
 
 /** An IPv4 address hidden inside an IPv6 one: ::ffff:a.b.c.d (mapped, also written as hex), ::a.b.c.d, 64:ff9b::/96 (NAT64). */
 function embeddedV4(ip6: string): string | null {
@@ -26,7 +32,10 @@ function embeddedV4(ip6: string): string | null {
 }
 
 export function blockedHost(hostname: string) {
-  const h = hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+  const h = hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
   if (BLOCKED_NAMES.has(h)) return true;
   if (net.isIPv4(h)) return blocked.check(h, "ipv4");
   if (net.isIPv6(h)) {

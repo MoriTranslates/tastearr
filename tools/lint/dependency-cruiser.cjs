@@ -7,7 +7,13 @@ const layer = (name) => `^server/${name}/`;
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
-    { name: "no-circular", severity: "error", comment: "Import cycles make load order and testing fragile.", from: {}, to: { circular: true } },
+    {
+      name: "no-circular",
+      severity: "error",
+      comment: "Import cycles make load order and testing fragile.",
+      from: {},
+      to: { circular: true },
+    },
     { name: "not-to-unresolvable", severity: "error", from: {}, to: { couldNotResolve: true } },
     {
       name: "core-is-pure",

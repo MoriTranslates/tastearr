@@ -1,7 +1,19 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { csrfOk, hostAllowed, inCidr, isHomeNetwork, isLocalRequest, makeSession, revokeSession, signAction, trustProxyOption, validSession, verifyAction } from "../server/auth.js";
+import {
+  csrfOk,
+  hostAllowed,
+  inCidr,
+  isHomeNetwork,
+  isLocalRequest,
+  makeSession,
+  revokeSession,
+  signAction,
+  trustProxyOption,
+  validSession,
+  verifyAction,
+} from "../server/auth.js";
 import { setAccount } from "../server/settings.js";
 import { fakeReq } from "./helpers.ts";
 
@@ -13,7 +25,8 @@ afterEach(() => {
 
 test("home network: 10/8, 192.168/16 and IPv6 ULA/link-local; never Docker's 172.16/12 or loopback", () => {
   for (const ip of ["10.0.0.5", "192.168.1.20", "::ffff:192.168.0.9", "fd12:3456::1", "fe80::1"]) assert.equal(isHomeNetwork(ip), true, ip);
-  for (const ip of ["172.17.0.1", "172.18.0.1", "::ffff:172.17.0.1", "127.0.0.1", "::1", "8.8.8.8", "2001:db8::1", "100.64.0.1"]) assert.equal(isHomeNetwork(ip), false, ip);
+  for (const ip of ["172.17.0.1", "172.18.0.1", "::ffff:172.17.0.1", "127.0.0.1", "::1", "8.8.8.8", "2001:db8::1", "100.64.0.1"])
+    assert.equal(isHomeNetwork(ip), false, ip);
 });
 
 test("TASTEARR_LOCAL_NETWORKS replaces the defaults", () => {
@@ -34,7 +47,8 @@ test("isLocalRequest: a Docker gateway / loopback address is not local (internet
 });
 
 test("isLocalRequest: any forwarding header means a proxy or tunnel, unless TRUST_PROXY names it", () => {
-  for (const h of ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "via"]) assert.equal(isLocalRequest(fakeReq({ headers: { [h]: "192.168.1.20" } })), false, h);
+  for (const h of ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "via"])
+    assert.equal(isLocalRequest(fakeReq({ headers: { [h]: "192.168.1.20" } })), false, h);
 });
 
 test("isLocalRequest: a hop-count TRUST_PROXY never allows the bypass (X-Forwarded-For could be forged)", () => {
@@ -55,8 +69,10 @@ test("TRUST_PROXY=true is refused", () => {
 });
 
 test("hostAllowed: IPs and LAN names only (DNS-rebinding guard)", () => {
-  for (const host of ["192.168.1.5:8383", "[fd00::5]:8383", "tower:8383", "localhost", "nas.local", "media.lan", "x.home.arpa"]) assert.equal(hostAllowed(fakeReq({ headers: { host } })), true, host);
-  for (const host of ["evil.example.com", "tastearr.mydomain.com:443", ""]) assert.equal(hostAllowed(fakeReq({ headers: { host } })), false, host);
+  for (const host of ["192.168.1.5:8383", "[fd00::5]:8383", "tower:8383", "localhost", "nas.local", "media.lan", "x.home.arpa"])
+    assert.equal(hostAllowed(fakeReq({ headers: { host } })), true, host);
+  for (const host of ["evil.example.com", "tastearr.mydomain.com:443", ""])
+    assert.equal(hostAllowed(fakeReq({ headers: { host } })), false, host);
   process.env.TASTEARR_ALLOWED_HOSTS = "tastearr.mydomain.com";
   assert.equal(hostAllowed(fakeReq({ headers: { host: "tastearr.mydomain.com" } })), true);
 });

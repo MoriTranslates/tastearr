@@ -22,12 +22,18 @@ export function trustProxyOption(): number | string[] | false {
   const v = (process.env.TRUST_PROXY ?? "").trim();
   if (!v || v === "false") return false;
   if (v === "true") {
-    if (!warnedTrue) console.warn("TRUST_PROXY=true is not allowed (anyone could fake their IP). Use a hop count or your proxy's IP/CIDR, e.g. TRUST_PROXY=172.18.0.0/16");
+    if (!warnedTrue)
+      console.warn(
+        "TRUST_PROXY=true is not allowed (anyone could fake their IP). Use a hop count or your proxy's IP/CIDR, e.g. TRUST_PROXY=172.18.0.0/16",
+      );
     warnedTrue = true;
     return false;
   }
   if (/^\d+$/.test(v)) return Number(v);
-  return v.split(",").map((x) => x.trim()).filter(Boolean);
+  return v
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 /** At startup; isLocalRequest re-reads the variable so tests can change it. */
 export const PROXY_TRUSTED = trustProxyOption() !== false;
@@ -81,7 +87,18 @@ export function isPrivateIp(ip: string) {
   return ip === "::1" || /^f[cd]/i.test(ip) || /^fe80:/i.test(ip);
 }
 
-const FORWARD_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-server", "x-client-ip", "via"];
+const FORWARD_HEADERS = [
+  "x-forwarded-for",
+  "forwarded",
+  "x-real-ip",
+  "cf-connecting-ip",
+  "true-client-ip",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-forwarded-server",
+  "x-client-ip",
+  "via",
+];
 
 /**
  * "Disabled for local addresses": the request must come from a private IP, and must not have passed through
@@ -113,7 +130,10 @@ export function inCidr(ip: string, cidr: string) {
  * same host) never count, unless TASTEARR_LOCAL_NETWORKS lists them (comma-separated IPv4 CIDRs).
  */
 export function isHomeNetwork(ip: string) {
-  const custom = (process.env.TASTEARR_LOCAL_NETWORKS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  const custom = (process.env.TASTEARR_LOCAL_NETWORKS ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
   if (custom.length) return custom.some((c) => inCidr(ip, c));
   const a = v4(ip);
   if (net.isIPv4(a)) return inCidr(a, "10.0.0.0/8") || inCidr(a, "192.168.0.0/16");
@@ -133,10 +153,24 @@ function isProxyPeer(peer: string) {
  * The public externalUrl deliberately does NOT qualify: requests for it usually came through a proxy.
  */
 export function hostAllowed(req: FastifyRequest) {
-  const host = (req.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "").toLowerCase();
+  const host = (req.headers.host ?? "")
+    .replace(/:\d+$/, "")
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase();
   if (!host) return false;
-  if (net.isIP(host) || host === "localhost" || !host.includes(".") || host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".home.arpa")) return true;
-  return (process.env.TASTEARR_ALLOWED_HOSTS ?? "").split(",").map((x) => x.trim().toLowerCase()).includes(host);
+  if (
+    net.isIP(host) ||
+    host === "localhost" ||
+    !host.includes(".") ||
+    host.endsWith(".local") ||
+    host.endsWith(".lan") ||
+    host.endsWith(".home.arpa")
+  )
+    return true;
+  return (process.env.TASTEARR_ALLOWED_HOSTS ?? "")
+    .split(",")
+    .map((x) => x.trim().toLowerCase())
+    .includes(host);
 }
 
 /** Blocks cross-site form posts: state-changing browser requests must carry our header and a same-origin Origin. */
@@ -156,7 +190,8 @@ export function authState(req: FastifyRequest) {
   const a = getSettings().auth;
   const setupRequired = !a.passwordHash;
   if (setupRequired) return { setupRequired, ok: false, via: null };
-  if (safeEqual(req.headers["x-api-key"] as string | undefined, getSettings().apiKey)) return { setupRequired, ok: true, via: "apikey" as const };
+  if (safeEqual(req.headers["x-api-key"] as string | undefined, getSettings().apiKey))
+    return { setupRequired, ok: true, via: "apikey" as const };
   if (validSession(req.cookies[COOKIE])) return { setupRequired, ok: true, via: "session" as const };
   if (a.bypassLocal && isLocalRequest(req) && hostAllowed(req)) return { setupRequired, ok: true, via: "local" as const };
   return { setupRequired, ok: false, via: null };
