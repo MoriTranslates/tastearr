@@ -7,32 +7,44 @@ import { recommend } from "./picks.js";
 import { getProfile } from "./profile.js";
 import { prewarmQuiz } from "./quiz.js";
 import { getSettings } from "./settings.js";
-import { flushPending } from "./webhooks.js";
+import { flushPending, resumePendingAlerts } from "./webhooks.js";
 
 /** Background work: the 6-hourly refresh (profile, picks, season alert, auto-add) and half-hourly airing alerts. */
 
 type Log = (msg: string) => void;
 
-async function refresh(warn: Log) {
-  try {
-    setJob("refresh", "running", "Refreshing seasons");
-    const cur = seasonOf();
-    const next = shiftSeason(cur, 1);
-    if (getSettings().auth.passwordHash) {
-      await getProfile();
-      await recommend(cur.season, cur.year);
-      await notifySeason(next.season, next.year);
-      await runAutoAdd();
+/**
+ * One refresh. Each step runs even when an earlier one failed (an AniList outage during the profile build must not
+ * also skip auto-add from the last good profile); the job ends in "error" naming every step that failed.
+ */
+export async function refresh(warn: Log) {
+  setJob("refresh", "running", "Refreshing seasons");
+  const failed: string[] = [];
+  const step = async (name: string, fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (e) {
+      failed.push(`${name}: ${(e as Error).message}`);
     }
-    setJob("refresh", "done", "Seasons up to date");
-  } catch (e) {
-    setJob("refresh", "error", (e as Error).message);
-    warn(`Background refresh failed: ${(e as Error).message}`);
+  };
+  const cur = seasonOf();
+  const next = shiftSeason(cur, 1);
+  if (getSettings().auth.passwordHash) {
+    await step("taste profile", () => getProfile());
+    await step("picks", () => recommend(cur.season, cur.year));
+    await step("season alert", () => notifySeason(next.season, next.year));
+    await step("auto-add", () => runAutoAdd());
   }
+  if (failed.length) {
+    setJob("refresh", "error", failed.join("; "));
+    warn(`Background refresh failed: ${failed.join("; ")}`);
+  } else setJob("refresh", "done", "Seasons up to date");
 }
 
 /** Starts the timers. Returns a stop function that also sends any batched episode alerts (for shutdown). */
 export function startJobs(warn: Log) {
+  const resumed = resumePendingAlerts();
+  if (resumed) warn(`Sending ${resumed} episode alert batch${resumed > 1 ? "es" : ""} left from before the restart`);
   const timers = [
     setTimeout(() => void refresh(warn), 15_000),
     setInterval(() => void refresh(warn), 6 * 3_600_000),

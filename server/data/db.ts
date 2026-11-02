@@ -51,6 +51,16 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS auto_added (anilist_id INTEGER PRIMARY KEY, title TEXT NOT NULL, season TEXT NOT NULL, year INTEGER NOT NULL, match INTEGER NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);`,
   // 6: logged-out session cookies (SHA-256 of the cookie), kept until they would have expired anyway
   `CREATE TABLE IF NOT EXISTS revoked_sessions (hash TEXT PRIMARY KEY, exp INTEGER NOT NULL);`,
+  // 7: "new episode" alerts still being batched, so a crash or kill doesn't lose them. `rev` changes on every merge, so
+  // a flush only deletes the batch it actually sent.
+  `CREATE TABLE IF NOT EXISTS pending_alerts (tvdb_id INTEGER PRIMARY KEY, series TEXT NOT NULL, episodes TEXT NOT NULL,
+     first_at INTEGER NOT NULL, due_at INTEGER NOT NULL, rev INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0);`,
+  // 8: job history kept apart from the latest state, so a later success doesn't erase the last failure
+  `ALTER TABLE jobs ADD COLUMN last_error TEXT;
+   ALTER TABLE jobs ADD COLUMN last_error_at INTEGER;
+   ALTER TABLE jobs ADD COLUMN last_success_at INTEGER;
+   UPDATE jobs SET last_error = detail, last_error_at = finished_at WHERE state = 'error';
+   UPDATE jobs SET last_success_at = finished_at WHERE state = 'done';`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
