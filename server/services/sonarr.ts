@@ -13,7 +13,16 @@ export type { SonarrSeries };
 export const testSonarr = (conn: ArrConn) => sonarr.status(conn);
 export const sonarrOptions = (conn: ArrConn = getSettings().sonarr) => sonarr.options(conn);
 
-let seriesCache: { at: number; list: SonarrSeries[] } | null = null;
+/**
+ * The series of every reachable Sonarr instance, plus a message for each instance that couldn't be read. A non-empty
+ * `failed` means the list is partial: a show missing from it may still be owned ("couldn't check", never "absent").
+ */
+export interface SeriesLibrary {
+  list: SonarrSeries[];
+  failed: string[];
+}
+
+let seriesCache: { at: number; lib: SeriesLibrary } | null = null;
 
 /** A series' `instance` is the address of the Sonarr it lives in (empty = the main one). */
 function connOf(instance = ""): ArrConn {
@@ -28,22 +37,48 @@ export function forgetSeries() {
   seriesCache = null;
 }
 
-/** Every series across all Sonarr instances. The main instance wins when the same show is in two. */
-export async function sonarrSeries(force = false): Promise<SonarrSeries[]> {
-  if (!force && seriesCache && Date.now() - seriesCache.at < 5 * 60_000) return seriesCache.list;
+/**
+ * Every series across all Sonarr instances, and which instances failed. The main instance wins when the same show is
+ * in two. The main instance failing throws; an extra one failing is reported in `failed`. A partial list is not
+ * cached, so the next call tries the missing instance again.
+ */
+export async function sonarrLibrary(force = false): Promise<SeriesLibrary> {
+  if (!force && seriesCache && Date.now() - seriesCache.at < 5 * 60_000) return seriesCache.lib;
   const list = (await sonarr.allSeries(getSettings().sonarr)).map((x) => ({ ...x, instance: "" }));
   const have = new Set(list.map((x) => x.tvdbId));
   const extra = getSettings().sonarrExtra;
+  const failed: string[] = [];
   for (let i = 0; i < extra.length; i++) {
     try {
       for (const x of await sonarr.allSeries(extra[i])) if (!have.has(x.tvdbId)) list.push({ ...x, instance: extra[i].url });
     } catch (e) {
-      console.warn(`Sonarr "${extra[i].name}" unreachable: ${(e as Error).message}`);
+      failed.push(`Sonarr "${extra[i].name}" unreachable: ${(e as Error).message}`);
     }
   }
-  seriesCache = { at: Date.now(), list };
-  return list;
+  for (const f of failed) console.warn(f);
+  const lib = { list, failed };
+  seriesCache = failed.length ? null : { at: Date.now(), lib };
+  return lib;
 }
+
+/** Every series that could be read (possibly partial, see `sonarrLibrary`): for display, never for "is it owned?" before a write. */
+export async function sonarrSeries(force = false): Promise<SonarrSeries[]> {
+  return (await sonarrLibrary(force)).list;
+}
+
+/** The library, refusing while any instance can't be read: for deciding between "add" and "monitor" before a write. */
+export async function completeSonarrLibrary(force = false): Promise<SonarrSeries[]> {
+  const lib = await sonarrLibrary(force);
+  if (lib.failed.length) throw ownershipUnknown(lib.failed);
+  return lib.list;
+}
+
+/** "Couldn't check" is never "not there": a write that depends on ownership stops instead. */
+const ownershipUnknown = (failed: string[]) =>
+  fail(
+    `Can't tell whether this show is already in one of your Sonarr instances (${failed.join("; ")}). Nothing was changed; try again when it is reachable.`,
+    503,
+  );
 
 async function ensureTag(conn: ArrConn): Promise<number | null> {
   try {
@@ -107,10 +142,10 @@ export async function addSeries(
   const cfg = getSettings().sonarr;
   if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw fail("Pick a quality profile and root folder in Settings first", 400);
   const s = await lookupTvdb(cfg, tvdbId);
-  // Idempotent: a retry after a timeout, or an auto-add run after a crash, finds the series already there (Sonarr's
-  // lookup gives library series their id) and reports it instead of failing on "already added".
-  if (s.id) return { id: s.id, title: s.title, monitored: "Already in Sonarr", waitingForSeason: false, alreadyAdded: true };
   const choice = opts.monitor ?? defaultMonitor(season, cfg.sequelMonitor, opts.firstOfMany);
+  // Idempotent: a retry after a timeout, an auto-add run after a crash, or a decision made from a stale library finds
+  // the series already there (Sonarr's lookup gives library series their id; extra instances are asked directly).
+  if (s.id || (await inExtraInstance(tvdbId))) return alreadyThere(s, season, choice, opts.search);
   const { monitor, listed, addOptions } = planSeriesAdd(s, season, choice, opts.search ?? cfg.searchOnAdd);
   const tag = await ensureTag(cfg);
   let added: SonarrSeries;
@@ -141,7 +176,44 @@ export async function addSeries(
     monitored: MONITOR_LABEL[monitor](season),
     waitingForSeason: monitor === "season" && !listed,
     alreadyAdded: false,
+    seasonMonitored: monitor !== "none" && monitor !== "future",
   };
+}
+
+/**
+ * Whether an extra Sonarr instance already has the series. Throws when one can't be asked: adding to the main
+ * instance then could create a second copy of a show the user already owns.
+ */
+async function inExtraInstance(tvdbId: number) {
+  const failed: string[] = [];
+  for (const x of getSettings().sonarrExtra) {
+    try {
+      if (await sonarr.seriesByTvdb(x, tvdbId)) return true;
+    } catch (e) {
+      failed.push(`Sonarr "${x.name}" unreachable: ${(e as Error).message}`);
+    }
+  }
+  if (failed.length) throw ownershipUnknown(failed);
+  return false;
+}
+
+/**
+ * The series is already in Sonarr: do what the add was for. A requested season is monitored (an add decided from a
+ * stale library must not silently skip it); "future", "none" or an unknown season changes nothing.
+ */
+async function alreadyThere(s: SonarrSeries, season: number | null, choice: MonitorChoice, search?: boolean) {
+  if (season && choice !== "future" && choice !== "none") {
+    const r = await monitorSeason(s.tvdbId, season, search);
+    return {
+      id: r.id,
+      title: r.title,
+      monitored: `Already in Sonarr, season ${season} turned on`,
+      waitingForSeason: r.waitingForSeason,
+      alreadyAdded: true,
+      seasonMonitored: true,
+    };
+  }
+  return { id: s.id, title: s.title, monitored: "Already in Sonarr", waitingForSeason: false, alreadyAdded: true, seasonMonitored: false };
 }
 
 export async function setMonitored(seriesId: number, monitored: boolean, instance = "") {
@@ -162,9 +234,17 @@ export async function seriesMonitored(tvdbId: number) {
  */
 export const REFRESH_WAIT = { polls: 10, everyMs: 2000 };
 
+/** A series by TVDB id from a fresh library; "not found" only counts when every instance answered. */
+async function findSeries(tvdbId: number) {
+  const lib = await sonarrLibrary(true);
+  const s = lib.list.find((x) => x.tvdbId === tvdbId);
+  if (!s && lib.failed.length) throw ownershipUnknown(lib.failed);
+  return s ?? null;
+}
+
 /** Monitors one season of a series that's already in Sonarr (refreshing it first if TVDB is newer) and searches for it. */
 export async function monitorSeason(tvdbId: number, season: number, search = getSettings().sonarr.searchOnAdd) {
-  const s = (await sonarrSeries(true)).find((x) => x.tvdbId === tvdbId);
+  const s = await findSeries(tvdbId);
   if (!s) throw fail("Series is not in Sonarr", 404);
   const c = connOf(s.instance);
   let full = await sonarr.getSeries(c, s.id);

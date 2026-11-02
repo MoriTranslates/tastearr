@@ -8,7 +8,7 @@ import { firstOfMany, mapAnilist, mappingTables, saveOverride } from "./mapping.
 import { setFeedback } from "./picks.js";
 import { addMovie } from "./radarr.js";
 import { getSettings } from "./settings.js";
-import { addSeries, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrSeries } from "./sonarr.js";
+import { addSeries, completeSonarrLibrary, lookupByTitle, monitorSeason, planAdd, seriesMonitored, sonarrSeries } from "./sonarr.js";
 
 /** The Add / Monitor buttons on a pick: preview what will happen, find a TVDB match by title, then do it. */
 
@@ -116,7 +116,7 @@ export async function addPick(anilistId: number, req: AddRequest) {
       throw fail("That isn't one of Sonarr's matches for this show", 422);
     const asked = Number(req.season);
     const season = Number.isInteger(asked) && asked >= 1 && asked <= 100 ? asked : await guessSeason(m, tvdbId);
-    const owned = (await sonarrSeries(true)).some((x) => x.tvdbId === tvdbId);
+    const owned = (await completeSonarrLibrary(true)).some((x) => x.tvdbId === tvdbId);
     // Never remember "this show is that series, season unknown" for something already in Sonarr: it would hide the
     // "get the new season" choice for good. Ask for the season instead.
     if (owned && !season) throw fail("This series is already in Sonarr. Choose which season this is.", 422);
@@ -126,7 +126,7 @@ export async function addPick(anilistId: number, req: AddRequest) {
   } else {
     const map = await mapAnilist(anilistId);
     if (!map) throw fail("Pick the matching show first", 422);
-    const owned = (await sonarrSeries()).some((x) => x.tvdbId === map.tvdbId);
+    const owned = (await completeSonarrLibrary()).some((x) => x.tvdbId === map.tvdbId);
     if (owned) {
       if (!map.season) throw fail("This show is already in Sonarr", 409);
       r = await monitorSeason(map.tvdbId, map.season);

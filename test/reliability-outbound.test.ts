@@ -107,12 +107,19 @@ const lookupHit = (over: Record<string, unknown> = {}) => [
   { tvdbId: 321, title: "Hero Saga", seasons: [{ seasonNumber: 1, monitored: false }], ...over },
 ];
 
-test("Sonarr add: a series already in the library is reported, not added again", async () => {
+test("Sonarr add: a series already in the library (no season asked for) is reported, not added again", async () => {
   patchSettings((s) => ({ ...s, sonarr: { ...s.sonarr, ...sonarrConn } }));
   const m = mockFetch((u) => (u.pathname === "/api/v3/series/lookup" ? json(lookupHit({ id: 44 })) : undefined));
   try {
-    const r = await addSeries(321, 1);
-    assert.deepEqual(r, { id: 44, title: "Hero Saga", monitored: "Already in Sonarr", waitingForSeason: false, alreadyAdded: true });
+    const r = await addSeries(321, null);
+    assert.deepEqual(r, {
+      id: 44,
+      title: "Hero Saga",
+      monitored: "Already in Sonarr",
+      waitingForSeason: false,
+      alreadyAdded: true,
+      seasonMonitored: false,
+    });
     assert.ok(!m.calls.some((c) => c.method === "POST"));
   } finally {
     m.restore();

@@ -1,3 +1,4 @@
+import { inBackground } from "../adapters/anilist.js";
 import { seasonOf, shiftSeason } from "../core/taste/media.js";
 import { setJob } from "../data/jobs.js";
 import { runAutoAdd } from "./autoadd.js";
@@ -17,7 +18,12 @@ type Log = (msg: string) => void;
  * One refresh. Each step runs even when an earlier one failed (an AniList outage during the profile build must not
  * also skip auto-add from the last good profile); the job ends in "error" naming every step that failed.
  */
-export async function refresh(warn: Log) {
+export function refresh(warn: Log) {
+  // Background lane: a page the user opens meanwhile gets its AniList calls first.
+  return inBackground(() => refreshSteps(warn));
+}
+
+async function refreshSteps(warn: Log) {
   setJob("refresh", "running", "Refreshing seasons");
   const failed: string[] = [];
   const step = async (name: string, fn: () => Promise<unknown>) => {
@@ -30,7 +36,8 @@ export async function refresh(warn: Log) {
   const cur = seasonOf();
   const next = shiftSeason(cur, 1);
   if (getSettings().auth.passwordHash) {
-    await step("taste profile", () => getProfile());
+    // Strict: a rebuild that failed (or kept the old profile because Sonarr/Plex didn't answer) fails this step too.
+    await step("taste profile", () => getProfile(undefined, { strict: true }));
     await step("picks", () => recommend(cur.season, cur.year));
     await step("season alert", () => notifySeason(next.season, next.year));
     await step("auto-add", () => runAutoAdd());
@@ -48,11 +55,12 @@ export function startJobs(warn: Log) {
   const timers = [
     setTimeout(() => void refresh(warn), 15_000),
     setInterval(() => void refresh(warn), 6 * 3_600_000),
-    setInterval(() => void announceAired().catch((e) => warn(`Airing alerts failed: ${(e as Error).message}`)), 30 * 60_000),
+    setInterval(() => void inBackground(announceAired).catch((e) => warn(`Airing alerts failed: ${(e as Error).message}`)), 30 * 60_000),
   ];
   // A new install with nothing connected will start with the quiz: have it ready.
   const s = getSettings();
-  if (!s.sonarr.url && !s.lists.anilistUser && Object.keys(s.genrePrefs).length === 0) timers.push(setTimeout(prewarmQuiz, 3_000));
+  if (!s.sonarr.url && !s.lists.anilistUser && Object.keys(s.genrePrefs).length === 0)
+    timers.push(setTimeout(() => void inBackground(async () => prewarmQuiz()), 3_000));
   return {
     stop() {
       for (const t of timers) clearTimeout(t);

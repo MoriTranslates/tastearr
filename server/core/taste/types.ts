@@ -84,6 +84,11 @@ export interface Ctx {
   /** The user has a library or history to learn from (not quiz-only). */
   hasHistory: boolean;
   sources: Record<string, string>;
+  /**
+   * Configured sources that couldn't be read for this context (Sonarr, an extra Sonarr, Radarr, the media server).
+   * Non-empty means the context is incomplete: fine to show, but nothing may be saved or written from it.
+   */
+  degraded?: string[];
 }
 
 /** The settings the engine reads. */

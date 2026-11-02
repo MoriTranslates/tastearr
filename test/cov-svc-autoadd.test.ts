@@ -120,11 +120,11 @@ describe("auto-add", () => {
     assert.equal(autoAddedIds().has(301), false);
   });
 
-  test("Sonarr unreachable: nothing is recorded, nothing thrown", async () => {
+  test("Sonarr unreachable: nothing is recorded, and the run fails instead of reporting success", async () => {
     w.fail.sonarr = 502;
     invalidateContext();
-    const { value } = await quietWarn(() => runAutoAdd());
-    assert.deepEqual(value, []);
+    await quietWarn(() => assert.rejects(runAutoAdd(), /Auto-add skipped because a source couldn't be read: sonarr/));
+    assert.equal(w.sonarrAdded.length, 0);
     assert.equal(autoAddedIds().size, 0);
   });
 });

@@ -1,4 +1,5 @@
 import type { TasteProfile } from "../../shared/api.js";
+import { inBackground } from "../adapters/anilist.js";
 import { eligible } from "../core/taste/features.js";
 import { seasonOf, shiftSeason, type Media, type Season } from "../core/taste/media.js";
 import { acceptExtra, computeProfile, extraTrainingIds } from "../core/taste/profile.js";
@@ -34,6 +35,11 @@ export async function buildProfile(
       for (const err of lists.errors) problems.push(`list import failed (keeping the last import): ${err}`);
     }
     const ctx = opts.ctx ?? (await context(true));
+    // Sonarr, an extra Sonarr, Radarr or the media server didn't answer: a profile learned without it would replace a
+    // good one with a worse one (and with no library at all, switch to quiz-only weighting). Keep the stored profile
+    // and fail the job; the next build tries again.
+    if (save && ctx.degraded?.length)
+      throw new Error(`Kept the last taste profile because a source couldn't be read: ${ctx.degraded.join("; ")}`);
     const end = opts.until ?? seasonOf();
 
     // A season AniList can't send (rate limit, outage) uses its cached copy, or is left out; the build only fails
@@ -88,7 +94,8 @@ let lastFailure = 0;
 export const PROFILE_RETRY_MS = 30 * 60_000;
 
 export function rebuildProfile() {
-  building ??= buildProfile()
+  // A build is minutes of AniList calls: background lane, so pages the user opens meanwhile aren't stuck behind it.
+  building ??= inBackground(() => buildProfile())
     .catch((e: unknown) => {
       lastFailure = Date.now();
       throw e;
@@ -101,16 +108,17 @@ export const isBuilding = () => building !== null;
 
 /**
  * The stored profile, rebuilt when older than `maxAgeMs`. If the rebuild fails (AniList down) and an older profile
- * exists, that one is used, so picks and auto-add keep working; the failure stays on the profile job.
+ * exists, that one is used, so picks and auto-add keep working; the failure stays on the profile job. `strict`
+ * (the background refresh) throws instead, so the refresh doesn't report success while the profile is out of date.
  */
-export async function getProfile(maxAgeMs = 86_400_000): Promise<TasteProfile> {
+export async function getProfile(maxAgeMs = 86_400_000, opts: { strict?: boolean } = {}): Promise<TasteProfile> {
   const p = storedProfile();
   if (p && Date.now() - p.builtAt < maxAgeMs) return p;
   if (p && Date.now() - lastFailure < PROFILE_RETRY_MS) return p;
   try {
     return await rebuildProfile();
   } catch (e) {
-    if (!p) throw e;
+    if (!p || opts.strict) throw e;
     console.warn(`Profile rebuild failed, using the one from ${new Date(p.builtAt).toISOString()}: ${(e as Error).message}`);
     return p;
   }

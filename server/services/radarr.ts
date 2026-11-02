@@ -20,8 +20,11 @@ export async function radarrMovies(force = false): Promise<RadarrMovie[]> {
   return list;
 }
 
-/** Adds a movie by TMDB id, or by IMDb id when the community mapping has no TMDB id for it. */
-export async function addMovie(ids: { tmdbId?: number | null; imdbId?: string | null }) {
+/**
+ * Adds a movie by TMDB id, or by IMDb id when the community mapping has no TMDB id for it. `search` overrides the
+ * Radarr "search on add" setting (auto-add passes its own switch, as it does for Sonarr).
+ */
+export async function addMovie(ids: { tmdbId?: number | null; imdbId?: string | null }, opts: { search?: boolean } = {}) {
   const cfg = getSettings().radarr;
   if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw fail("Pick a Radarr quality profile and root folder in Settings first", 400);
   const m = ids.tmdbId
@@ -47,7 +50,7 @@ export async function addMovie(ids: { tmdbId?: number | null; imdbId?: string | 
       minimumAvailability: cfg.minimumAvailability,
       monitored: true,
       tags: [...new Set([...cfg.tags, ...(tag ? [tag] : [])])],
-      addOptions: { searchForMovie: cfg.searchOnAdd },
+      addOptions: { searchForMovie: opts.search ?? cfg.searchOnAdd },
     });
   } catch (e) {
     // A timed-out answer or a lost race: if the movie is in Radarr now, the add happened.

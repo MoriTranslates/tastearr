@@ -11,6 +11,8 @@ import { json, mockFetch, media, tags } from "./helpers.ts";
  */
 
 export const SONARR = "http://sonarr.test:8989";
+/** A second ("extra") Sonarr instance. */
+export const SONARR2 = "http://sonarr2.test:8989";
 export const RADARR = "http://radarr.test:7878";
 export const NTFY = "http://ntfy.test/alerts";
 
@@ -23,12 +25,26 @@ export interface World {
   malList: { id: number; status: string; score: number; eps: number }[];
   aired: { mediaId: number; episode: number; airingAt: number }[];
   sonarrSeries: Record<string, unknown>[];
+  /** The extra instance's library. */
+  sonarr2Series: Record<string, unknown>[];
   /** Series Sonarr "knows" for lookup, by tvdb id. */
   sonarrLookup: Map<number, Record<string, unknown>>;
   sonarrAdded: Record<string, unknown>[];
+  /** Series PUT back to either Sonarr (monitoring changes), and commands sent (searches, refreshes). */
+  sonarrPut: Record<string, unknown>[];
+  sonarrCommands: Record<string, unknown>[];
+  radarrMovies: Record<string, unknown>[];
+  /** Movies Radarr "knows" for lookup, by TMDB id. */
+  radarrLookup: Map<number, Record<string, unknown>>;
+  radarrAdded: Record<string, unknown>[];
   ntfySent: { title: string; message: string }[];
   /** Per-service switches: respond with this HTTP status instead of working. */
-  fail: Partial<Record<"anilistSeason" | "anilistList" | "anilistAired" | "mal" | "sonarr" | "sonarrAdd" | "ntfy", number>>;
+  fail: Partial<
+    Record<
+      "anilistSeason" | "anilistList" | "anilistAired" | "mal" | "sonarr" | "sonarr2" | "sonarrAdd" | "radarr" | "radarrAdd" | "ntfy",
+      number
+    >
+  >;
   /** Requests failing for specific tvdb ids on add. */
   failAddFor: Set<number>;
 }
@@ -41,8 +57,14 @@ export function newWorld(): World {
     malList: [],
     aired: [],
     sonarrSeries: [],
+    sonarr2Series: [],
     sonarrLookup: new Map(),
     sonarrAdded: [],
+    sonarrPut: [],
+    sonarrCommands: [],
+    radarrMovies: [],
+    radarrLookup: new Map(),
+    radarrAdded: [],
     ntfySent: [],
     fail: {},
     failAddFor: new Set(),
@@ -99,14 +121,41 @@ export function installWorld(w: World) {
         paging: {},
       });
     }
-    if (u.hostname === "sonarr.test") {
-      if (w.fail.sonarr) return json({}, w.fail.sonarr);
+    if (u.hostname === "sonarr.test" || u.hostname === "sonarr2.test") {
+      const main = u.hostname === "sonarr.test";
+      const failure = main ? w.fail.sonarr : w.fail.sonarr2;
+      if (failure) return json({}, failure);
+      const lib = main ? w.sonarrSeries : w.sonarr2Series;
       const p = u.pathname.replace("/api/v3", "");
-      if (p === "/series" && call.method === "GET") return json(w.sonarrSeries);
+      if (p === "/series" && call.method === "GET") return json(lib);
+      const one = /^\/series\/(\d+)$/.exec(p);
+      if (one) {
+        const s = lib.find((x) => x.id === Number(one[1]));
+        if (!s) return json({ message: "not found" }, 404);
+        if (call.method === "GET") return json(structuredClone(s));
+        w.sonarrPut.push(call.body as Record<string, unknown>);
+        Object.assign(s, call.body as object);
+        return json(s);
+      }
+      if (p === "/command") {
+        w.sonarrCommands.push(call.body as Record<string, unknown>);
+        return json({ id: w.sonarrCommands.length });
+      }
+      if (p.startsWith("/command/")) return json({ status: "completed" });
       if (p === "/series/lookup") {
-        const id = Number(u.searchParams.get("term")?.replace("tvdb:", ""));
-        const s = w.sonarrLookup.get(id);
-        return json(s ? [s] : []);
+        // Like Sonarr: a series already in this library comes back with its library id.
+        const term = u.searchParams.get("term") ?? "";
+        const withId = (s: Record<string, unknown>) => {
+          const owned = lib.find((x) => x.tvdbId === s.tvdbId);
+          return owned ? { ...s, id: owned.id } : s;
+        };
+        if (!term.startsWith("tvdb:")) {
+          // A title search: every known series whose title shares a word with the term.
+          const words = term.toLowerCase().split(/\s+/).filter(Boolean);
+          return json([...w.sonarrLookup.values()].filter((s) => words.some((x) => String(s.title).toLowerCase().includes(x))).map(withId));
+        }
+        const s = w.sonarrLookup.get(Number(term.slice(5)));
+        return json(s ? [withId(s)] : []);
       }
       if (p === "/series" && call.method === "POST") {
         const s = call.body as { tvdbId: number; title: string };
@@ -117,7 +166,25 @@ export function installWorld(w: World) {
       if (p === "/tag") return call.method === "POST" ? json({ id: 1 }) : json([]);
       if (p === "/qualityprofile") return json([{ id: 4, name: "HD" }]);
     }
-    if (u.hostname === "radarr.test") return json([]);
+    if (u.hostname === "radarr.test") {
+      if (w.fail.radarr) return json({}, w.fail.radarr);
+      const p = u.pathname.replace("/api/v3", "");
+      if (p === "/movie" && call.method === "GET") return json(w.radarrMovies);
+      if (p === "/movie/lookup/tmdb") {
+        const id = Number(u.searchParams.get("tmdbId"));
+        const owned = w.radarrMovies.find((x) => x.tmdbId === id);
+        const m = w.radarrLookup.get(id);
+        return m ? json(owned ? { ...m, id: owned.id } : m) : json({ message: "not found" }, 404);
+      }
+      if (p === "/movie" && call.method === "POST") {
+        if (w.fail.radarrAdd) return json({ message: "boom" }, w.fail.radarrAdd);
+        const m = call.body as { tmdbId: number; title: string };
+        w.radarrAdded.push(m);
+        return json({ id: 2000 + w.radarrAdded.length, title: m.title, tmdbId: m.tmdbId });
+      }
+      if (p === "/tag") return call.method === "POST" ? json({ id: 1 }) : json([]);
+      return json([]);
+    }
     if (u.hostname === "ntfy.test") {
       if (w.fail.ntfy) return json({}, w.fail.ntfy);
       const b = call.body as { title: string; message: string };
