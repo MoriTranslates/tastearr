@@ -32,11 +32,16 @@ export function canNotify() {
 
 const cap = (s: string) => s[0] + s.slice(1).toLowerCase();
 
-/** Sends the top picks for a season once. Returns true if a message was sent. */
+/**
+ * Sends the top picks for a season once. Returns true if a message was sent. Throws without sending (and without
+ * marking the season announced) when a source couldn't be read: owned shows would look new, and the correct alert
+ * would never go out.
+ */
 export async function notifySeason(season: Season, year: number, force = false) {
   const n = getSettings().notify;
   if (!force && (!n.seasonAlerts || seasonAnnounced(season, year))) return false;
-  const { picks } = await recommend(season, year);
+  const { picks, degraded } = await recommend(season, year);
+  if (degraded.length) throw new Error(`Season alert skipped because a source couldn't be read: ${degraded.join("; ")}`);
   // New to the user only: nothing they already have, rated, follow, watch or carry over from last season.
   const top = picks.filter((p) => !p.excluded && !p.inLibrary && !p.verdict && !p.myStatus && !p.carryOver).slice(0, n.picks);
   if (top.length < Math.min(n.picks, 5)) return false; // season line-up not announced yet

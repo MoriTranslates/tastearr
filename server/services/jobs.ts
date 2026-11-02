@@ -2,6 +2,7 @@ import { inBackground } from "../adapters/anilist.js";
 import { seasonOf, shiftSeason } from "../core/taste/media.js";
 import { setJob } from "../data/jobs.js";
 import { runAutoAdd } from "./autoadd.js";
+import { context } from "./context.js";
 import { announceAired } from "./following.js";
 import { notifySeason } from "./notify.js";
 import { recommend } from "./picks.js";
@@ -38,8 +39,15 @@ async function refreshSteps(warn: Log) {
   if (getSettings().auth.passwordHash) {
     // Strict: a rebuild that failed (or kept the old profile because Sonarr/Plex didn't answer) fails this step too.
     await step("taste profile", () => getProfile(undefined, { strict: true }));
-    await step("picks", () => recommend(cur.season, cur.year));
-    await step("season alert", () => notifySeason(next.season, next.year));
+    // Picks and the season alert from an incomplete library would treat owned shows as new: skip both, named in the
+    // job's error. (notifySeason refuses on its own too; auto-add checks a fresh context itself.)
+    let degraded: string[] = [];
+    await step("sources", async () => void (degraded = (await context()).degraded ?? []));
+    if (degraded.length) failed.push(`picks and season alert: skipped because a source couldn't be read: ${degraded.join("; ")}`);
+    else {
+      await step("picks", () => recommend(cur.season, cur.year));
+      await step("season alert", () => notifySeason(next.season, next.year));
+    }
     await step("auto-add", () => runAutoAdd());
   }
   if (failed.length) {

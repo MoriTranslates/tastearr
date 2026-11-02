@@ -16,9 +16,10 @@ const VERDICTS = [null, "loved", "liked", "meh", "disliked", "hidden", "added"];
 export function picksRoutes(app: FastifyInstance) {
   app.get<{ Querystring: Record<string, string | undefined> }>("/api/picks", async (req): Promise<PicksResponse> => {
     const { season, year } = parseSeason(req.query);
-    const r = await recommend(season, year, req.query.refresh === "1");
+    // `degraded` stays server-side: its messages are internal (addresses, error text).
+    const { picks, profileBuiltAt } = await recommend(season, year, req.query.refresh === "1");
     const following = new Set(followedIds());
-    return { season, year, ...r, picks: r.picks.map((p) => ({ ...p, following: following.has(p.id) })) };
+    return { season, year, profileBuiltAt, picks: picks.map((p) => ({ ...p, following: following.has(p.id) })) };
   });
 
   /** What "Add" will do, shown in the confirm dialog before anything is written to Sonarr/Radarr. */

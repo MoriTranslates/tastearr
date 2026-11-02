@@ -14,7 +14,11 @@ import { addMovie } from "../server/services/radarr.js";
 import { patchSettings } from "../server/services/settings.js";
 import { addSeries, forgetSeries, monitorSeason } from "../server/services/sonarr.js";
 import { feedbackFor } from "./cov-feedback.ts";
+import { seasonOf, shiftSeason } from "../server/core/taste/media.js";
+import { seasonAnnounced } from "../server/data/library.js";
+import { notifySeason } from "../server/services/notify.js";
 import {
+  addToSeason,
   installWorld,
   newWorld,
   NTFY,
@@ -22,6 +26,7 @@ import {
   RADARR,
   resetUserData,
   seedTaste,
+  show,
   SONARR,
   SONARR2,
   writeAnimeList,
@@ -196,6 +201,60 @@ describe("item 2: an unreachable extra Sonarr makes ownership unknown, so nothin
   test("monitorSeason says 'can't tell' rather than 'not in Sonarr' when the series may be in the missing instance", async () => {
     w.fail.sonarr2 = 503;
     await quietWarn(() => assert.rejects(monitorSeason(5000, 2), (e: Error & { statusCode?: number }) => e.statusCode === 503));
+  });
+});
+
+describe("fix review #1: no season alert from an incomplete context", () => {
+  const cur = seasonOf();
+  beforeEach(() => {
+    // Show 300 ("Journey 0", TVDB 5000) is already in Sonarr; 301 and 302 are new.
+    w.sonarrSeries.push(owned(60, 5000));
+    configure({ notify: { ntfyUrl: NTFY, discordWebhook: "", gotifyUrl: "", gotifyToken: "", seasonAlerts: true, picks: 2 } });
+    invalidateContext();
+    forgetSeries();
+  });
+  const seasonMessages = () => w.ntfySent.filter((m) => /anime picks/.test(m.title));
+
+  test("Sonarr down (503): the alert is refused, nothing is sent, and the season is not marked announced", async () => {
+    await buildProfile(); // a good profile exists; only the library is missing
+    w.fail.sonarr = 503;
+    invalidateContext();
+    forgetSeries();
+    await quietWarn(() =>
+      assert.rejects(notifySeason(cur.season, cur.year, true), /Season alert skipped because a source couldn't be read: sonarr/),
+    );
+    assert.equal(seasonMessages().length, 0, "nothing sent that could list owned shows");
+    assert.equal(seasonAnnounced(cur.season, cur.year), false, "the correct alert can still go out later");
+
+    delete w.fail.sonarr;
+    invalidateContext();
+    forgetSeries();
+    assert.equal(await notifySeason(cur.season, cur.year, true), true);
+    assert.equal(seasonMessages().length, 1);
+    assert.doesNotMatch(seasonMessages()[0].message, /Journey 0/, "the owned show is left out once Sonarr answers");
+    assert.equal(seasonAnnounced(cur.season, cur.year), true);
+  });
+
+  test("the background refresh skips picks and the season alert after the profile step met a source that was down", async () => {
+    await buildProfile();
+    patchSettings((s) => ({ ...s, auth: { ...s.auth, passwordHash: "set" } }));
+    // The refresh announces next season: give it a line-up there too.
+    const next = shiftSeason(cur, 1);
+    addToSeason(
+      w,
+      next.season,
+      next.year,
+      [400, 401, 402].map((id) => show(id, { season: next.season, seasonYear: next.year })),
+    );
+    w.fail.sonarr = 503;
+    invalidateContext();
+    forgetSeries();
+    await quietWarn(() => refresh(() => undefined));
+    assert.equal(seasonMessages().length, 0);
+    assert.equal(seasonAnnounced(next.season, next.year), false);
+    const r = job("refresh")!;
+    assert.equal(r.state, "error");
+    assert.match(r.detail, /picks and season alert: skipped because a source couldn't be read: sonarr/);
   });
 });
 
