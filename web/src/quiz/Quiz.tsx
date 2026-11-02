@@ -1,36 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, type Pref } from "../api";
 import { navigate } from "../router";
 import { ErrorBox, Spinner, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
-
-interface QuizShow {
-  id: number;
-  title: string;
-  cover: string | null;
-  year: number | null;
-  genres: string[];
-  archetype: string;
-  answer: string | null;
-}
-interface Option {
-  key: string;
-  label: string;
-}
-interface QuizData {
-  genres: Option[];
-  themes: Option[];
-  noGore: boolean;
-  genrePrefs: Record<string, Pref>;
-  shows: QuizShow[];
-}
-interface Found {
-  id: number;
-  title: string;
-  cover: string | null;
-  year: number | null;
-  format: string | null;
-}
+import type { Found, Option } from "./types";
+import { useQuizData } from "./useQuizData";
 
 const ANSWERS = [
   { v: "loved", label: "Loved" },
@@ -58,26 +32,11 @@ function PrefRow({ o, value, onChange }: { o: Option; value: Pref; onChange: (v:
 export function Quiz({ onDone }: { onDone: () => void }) {
   usePageTitle("Taste quiz");
   const toast = useToast();
-  const [data, setData] = useState<QuizData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data, setData, error, retry, prefs, setPrefs, noGore, setNoGore } = useQuizData();
   const [step, setStep] = useState<1 | 2>(1);
-  const [prefs, setPrefs] = useState<Record<string, Pref>>({});
-  const [noGore, setNoGore] = useState(false);
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Found[] | null>(null);
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    setError(null);
-    api<QuizData>("/quiz")
-      .then((d) => {
-        setData(d);
-        setPrefs(d.genrePrefs);
-        setNoGore(d.noGore);
-      })
-      .catch((e) => setError(e.message));
-  }, [reload]);
 
   async function saveGenres() {
     setSaving(true);
@@ -150,7 +109,7 @@ export function Quiz({ onDone }: { onDone: () => void }) {
     }
   }
 
-  if (error) return <ErrorBox error={error} retry={() => setReload((x) => x + 1)} />;
+  if (error) return <ErrorBox error={error} retry={retry} />;
   if (!data) return <Spinner label="Picking shows for the quiz… the first time takes a few seconds while Tastearr asks AniList." />;
   const answered = data.shows.filter((s) => s.answer).length;
 
