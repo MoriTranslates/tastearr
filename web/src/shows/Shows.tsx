@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "../router";
-import { clearPicksCache } from "../picks/Picks";
+import { clearPicksCache } from "../picks/picksCache";
 import { api, type Followed, type Show, type Status } from "../api";
 import { ErrorBox, Spinner, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
