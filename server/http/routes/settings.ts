@@ -76,7 +76,9 @@ export function settingsRoutes(app: FastifyInstance) {
   app.get("/api/discover", async () => discover());
   app.post<{ Body: { id: string; url: string } }>("/api/discover/use", async (req) => {
     // Every error useDiscovered throws is about what was asked for (stale id, bad or off-network address): a 400, not a 500.
-    const r = await userFacing(() => useDiscovered(String(req.body?.id ?? ""), String(req.body?.url ?? ""), authState(req).via === "session"));
+    const r = await userFacing(() =>
+      useDiscovered(String(req.body?.id ?? ""), String(req.body?.url ?? ""), authState(req).via === "session"),
+    );
     invalidateContext();
     return r;
   });

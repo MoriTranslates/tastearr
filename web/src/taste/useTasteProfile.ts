@@ -1,11 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Job, type Profile } from "../api";
+import { pollUntil } from "../lib/poll";
+
+const profileJob = (jobs: Job[]) => jobs.find((x) => x.name === "profile") ?? null;
 
 /** The taste profile and its build job; polls every 2 s while the profile is building. */
-export function useTasteProfile() {
+export function useTasteProfile(onRebuildError: (message: string) => void) {
   const [p, setP] = useState<Profile | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const stopRebuildPoll = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -14,7 +18,7 @@ export function useTasteProfile() {
       try {
         const [prof, sys] = await Promise.all([api<Profile>("/profile"), api<{ jobs: Job[] }>("/system")]);
         if (!alive) return;
-        const j = sys.jobs.find((x) => x.name === "profile") ?? null;
+        const j = profileJob(sys.jobs);
         setJob(j);
         if (!prof.building) setP(prof);
         if (prof.building || j?.state === "running") timer = setTimeout(load, 2000);
@@ -26,8 +30,27 @@ export function useTasteProfile() {
     return () => {
       alive = false;
       clearTimeout(timer);
+      stopRebuildPoll.current?.(); // leaving the page ends the "Rebuild now" follow-up too
     };
   }, []);
 
-  return { p, setP, job, setJob, error };
+  /** Starts a rebuild and follows its job until it finishes, then shows the new profile. */
+  async function rebuild() {
+    await api("/profile/rebuild", { body: {} });
+    setJob({ name: "profile", state: "running", detail: "Starting", startedAt: Date.now(), finishedAt: null });
+    stopRebuildPoll.current?.();
+    stopRebuildPoll.current = pollUntil({
+      step: async () => profileJob((await api<{ jobs: Job[] }>("/system")).jobs),
+      keepGoing: (j) => j?.state === "running",
+      onResult: (j) => {
+        setJob(j);
+        if (j?.state !== "running") void api<Profile>("/profile").then(setP, (e) => onRebuildError((e as Error).message));
+      },
+      onError: (e) => onRebuildError((e as Error).message),
+      delayMs: 2000,
+      firstDelayMs: 1500,
+    });
+  }
+
+  return { p, job, error, rebuild };
 }

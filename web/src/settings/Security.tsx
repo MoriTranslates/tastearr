@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Settings as S, type Status } from "../api";
 import { SecretInput, useToast } from "../components/ui";
 
-export function Security({ s, status, save: _save }: { s: S; status: Status; save: (p: Partial<S>) => Promise<S> }) {
+export function Security({ s, status }: { s: S; status: Status }) {
   const toast = useToast();
   const [bypass, setBypass] = useState(s.auth.bypassLocal);
   const [acct, setAcct] = useState({ currentPassword: "", username: s.auth.username, password: "" });

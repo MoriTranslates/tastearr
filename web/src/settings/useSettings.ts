@@ -18,5 +18,11 @@ export function useSettings() {
     setS(next);
     return next;
   };
-  return { s, setS, save, error, toast };
+  /** Re-reads the settings after something other than `save` changed them on the server (a detected app, an extra Sonarr). */
+  const reload = async () => {
+    const next = await api<Settings>("/settings");
+    setS(next);
+    return next;
+  };
+  return { s, save, reload, error, toast };
 }

@@ -19,7 +19,7 @@ const STEPS: Record<Mode, string[]> = {
 /** First-run guide. Starts by asking how the person watches, so streaming-only users never see server jargon. */
 export function Wizard({ status, onDone }: { status: Status; onDone: () => void }) {
   usePageTitle("Get started");
-  const { s, setS, save, error } = useSettings();
+  const { s, save, reload, error, toast } = useSettings();
   const [mode, setMode] = useState<Mode | null>(status.mode ? (status.mode as Mode) : null);
   const [step, setStep] = useState(0);
   const [gen, setGen] = useState(0);
@@ -85,7 +85,16 @@ export function Wizard({ status, onDone }: { status: Status; onDone: () => void 
       {name === "Download apps" && (
         <>
           <p className="muted small">Connect Sonarr (shows) and Radarr (movies) if you use them. Skip either one with Next.</p>
-          <AutoDetect onUsed={() => api("/settings").then((x) => (setS(x as never), setGen((g) => g + 1), onDone()))} />
+          <AutoDetect
+            onUsed={() =>
+              reload()
+                .then(() => {
+                  setGen((g) => g + 1);
+                  onDone();
+                })
+                .catch((e) => toast((e as Error).message, true))
+            }
+          />
           <ArrCard key={`sonarr-${gen}`} kind="sonarr" s={s} save={saveAndRefresh} />
           <ArrCard key={`radarr-${gen}`} kind="radarr" s={s} save={saveAndRefresh} />
         </>

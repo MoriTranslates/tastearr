@@ -8,7 +8,13 @@ import { COOKIE, SETUP_TOKEN } from "../server/http/auth.js";
 
 let cookie = "";
 const call = (method: "GET" | "POST" | "DELETE", url: string, body?: object) =>
-  app.inject({ method, url, remoteAddress: "203.0.113.7", headers: { host: "192.168.1.5:8383", "x-tastearr": "1", cookie }, payload: body });
+  app.inject({
+    method,
+    url,
+    remoteAddress: "203.0.113.7",
+    headers: { host: "192.168.1.5:8383", "x-tastearr": "1", cookie },
+    payload: body,
+  });
 
 before(async () => {
   await app.ready();
