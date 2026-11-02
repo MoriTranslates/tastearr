@@ -9,6 +9,11 @@ export interface ListRow {
   progress: number | null;
 }
 
+/** Deletes one source's entries; returns how many were removed. */
+export function clearListEntries(source: string) {
+  return Number(db.prepare("DELETE FROM list_entries WHERE source = ?").run(source).changes);
+}
+
 /** Replaces one source's entries. */
 export function replaceListEntries(source: string, rows: ListRow[]) {
   transaction(() => {

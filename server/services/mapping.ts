@@ -16,9 +16,23 @@ import { getMediaByIds } from "./catalog.js";
 const FILE = path.join(CONFIG_DIR, "anime-list-full.json");
 const MAX_AGE = 7 * 86_400_000;
 
+/**
+ * After a failed refresh (download or reload) the last good tables stay in use and the refresh is tried again after
+ * `firstMs`, doubling each time up to `maxMs`, instead of a week later. Tests shrink these.
+ */
+export const MAPPING_RETRY = { firstMs: 30 * 60_000, maxMs: 12 * 3_600_000 };
+
 let tables: MappingTables | null = null;
 let showIds: ShowIdTables = { anidb: new Map(), tmdb: new Map(), imdb: new Map(), anilist: new Map() };
-let loadedAt = 0;
+/** When the next refresh is due (MAX_AGE after a good one, sooner after a failure). */
+let dueAt = 0;
+let failures = 0;
+
+function retryLater(why: string) {
+  failures++;
+  dueAt = Date.now() + Math.min(MAPPING_RETRY.maxMs, MAPPING_RETRY.firstMs * 2 ** (failures - 1));
+  console.warn(`${why}; trying again at ${new Date(dueAt).toISOString()}`);
+}
 
 /** TMDB / IMDb / AniDB / AniList -> TVDB, for media-server shows matched by an agent that gives no TVDB id. */
 function buildShowIds(rows: AnimeListRow[]): ShowIdTables {
@@ -36,12 +50,13 @@ function buildShowIds(rows: AnimeListRow[]): ShowIdTables {
 
 async function refresh() {
   const stale = !fs.existsSync(FILE) || Date.now() - fs.statSync(FILE).mtimeMs > MAX_AGE;
+  let downloadFailed: string | null = null;
   if (stale) {
     try {
       await downloadAnimeList(FILE);
     } catch (e) {
       if (!fs.existsSync(FILE)) throw new Error(`Could not download anime mapping list: ${(e as Error).message}`, { cause: e });
-      console.warn("Mapping list refresh failed, using cached copy:", (e as Error).message);
+      downloadFailed = (e as Error).message;
     }
   }
   const overrides = mappingOverrides().map((o) => ({ anilistId: o.anilist_id, mapping: { tvdbId: o.tvdb_id, season: o.season } }));
@@ -56,14 +71,26 @@ async function refresh() {
   }
   tables = buildTables(rows, overrides);
   showIds = buildShowIds(rows);
-  loadedAt = Date.now();
+  if (downloadFailed) retryLater(`Mapping list refresh failed, using the cached copy (${downloadFailed})`);
+  else {
+    failures = 0;
+    dueAt = Date.now() + MAX_AGE;
+  }
 }
 
-/** One load at a time: requests arriving together (first page load, a stale list) share it instead of each downloading. */
+/**
+ * One load at a time: requests arriving together (first page load, a stale list) share it instead of each downloading.
+ * A failed refresh keeps the tables already loaded (only the very first load can fail a lookup).
+ */
 let loading: Promise<void> | null = null;
 async function ensure(): Promise<MappingTables> {
-  if (!(tables && Date.now() - loadedAt <= MAX_AGE)) {
-    loading ??= refresh().finally(() => (loading = null));
+  if (!tables || Date.now() >= dueAt) {
+    loading ??= refresh()
+      .catch((e: unknown) => {
+        if (!tables) throw e;
+        retryLater(`Mapping list refresh failed, keeping the loaded one (${(e as Error).message})`);
+      })
+      .finally(() => (loading = null));
     await loading;
   }
   return tables!;
@@ -79,7 +106,7 @@ export async function saveOverride(anilistId: number, tvdbId: number, season: nu
 /** Forgets every user-confirmed match (Settings -> "Reset show matches"); the community list applies again. */
 export function clearOverrides() {
   const n = clearMappingOverrides();
-  loadedAt = 0;
+  dueAt = 0;
   return n;
 }
 

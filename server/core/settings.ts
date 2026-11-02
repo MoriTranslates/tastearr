@@ -288,7 +288,9 @@ export function applyUpdate(cur: Settings, patch: unknown): Settings {
     for (const k of keys.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>;
     o[keys.at(-1)!] = v;
   }
-  const next = merge(cur, allowed) as Settings;
+  // A copy: sections the patch doesn't touch would otherwise be the caller's (cached) objects, normalised in place
+  // below before a later check could still throw. Nothing reaches `cur` until the caller saves the result.
+  const next = merge(structuredClone(cur), allowed) as Settings;
   for (const p of SECRET_PATHS) if (isMasked(getPath(next, p))) setPath(next as unknown as Record<string, unknown>, p, getPath(cur, p));
   next.sonarr.url = next.sonarr.url.replace(/\/+$/, "");
   next.radarr.url = next.radarr.url.replace(/\/+$/, "");

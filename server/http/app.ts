@@ -34,10 +34,26 @@ app.addHook(
 );
 await app.register(fastifyCookie);
 app.addHook("onRequest", guard);
-app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
-  app.log.warn(err.message);
-  reply.code(err.statusCode && err.statusCode >= 400 ? err.statusCode : 500).send({ error: err.message });
+app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
+  const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+  if (status === 500 && isInternal(err)) {
+    // Node, SQLite or a library speaking, not our own wording: it can carry SQL, file paths or resolver details.
+    // The full error goes to the log; the browser gets a reference to find it there.
+    req.log.error({ err }, `Internal error (ref ${req.id})`);
+    return reply.code(500).send({ error: `Something went wrong on the server. The Tastearr log has the details (ref ${req.id}).` });
+  }
+  req.log.warn(err.message);
+  return reply.code(status).send({ error: err.message });
 });
+
+/**
+ * Errors not written for the user: JavaScript runtime errors (TypeError, RangeError ...) and system or SQLite errors
+ * (they carry a `code` such as ENOTFOUND or ERR_SQLITE_ERROR). Our own errors are plain `Error`s or carry a status.
+ */
+function isInternal(err: Error) {
+  if (err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError || err instanceof SyntaxError) return true;
+  return typeof (err as { code?: unknown }).code === "string";
+}
 
 /** Docker HEALTHCHECK / Uptime Kuma: no login, no data. */
 app.get("/ping", async () => ({ status: "OK" }));

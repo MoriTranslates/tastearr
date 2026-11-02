@@ -5,7 +5,7 @@ import { checkOutbound } from "../../core/outbound.js";
 import { isMasked, type Settings } from "../../core/settings.js";
 import { invalidateContext } from "../../services/context.js";
 import { discover, useDiscovered } from "../../services/discover.js";
-import { refreshLists } from "../../services/lists.js";
+import { forgetUnconfiguredLists, refreshLists } from "../../services/lists.js";
 import {
   checkPlexSignIn,
   choosePlexServer,
@@ -27,6 +27,8 @@ export function settingsRoutes(app: FastifyInstance) {
   app.get("/api/settings", async (): Promise<PublicSettings> => publicSettings());
   app.put<{ Body: Partial<Settings> }>("/api/settings", async (req): Promise<PublicSettings> => {
     updateSettings(req.body);
+    // A list the user disconnected (username cleared) stops counting right away, not at the next profile build.
+    forgetUnconfiguredLists();
     invalidateContext();
     return publicSettings();
   });

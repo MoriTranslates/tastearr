@@ -58,8 +58,13 @@ export function buildTables(rows: AnimeListRow[], overrides: { anilistId: number
       push(t.anilistByMovie, movie, r.anilist_id);
     }
     if (!r.anilist_id || !r.tvdb_id) continue;
-    t.byAnilist.set(r.anilist_id, { tvdbId: r.tvdb_id, season: r.season?.tvdb ?? null });
-    push(t.byTvdb, r.tvdb_id, r.anilist_id);
+    const mapping = { tvdbId: r.tvdb_id, season: r.season?.tvdb ?? null };
+    // An AniList id listed twice (the last row wins) must leave the first series' list, and appear only once in each.
+    if (t.byAnilist.has(r.anilist_id)) place(t, r.anilist_id, mapping);
+    else {
+      t.byAnilist.set(r.anilist_id, mapping);
+      push(t.byTvdb, r.tvdb_id, r.anilist_id);
+    }
   }
   for (const o of overrides) place(t, o.anilistId, o.mapping);
   return t;

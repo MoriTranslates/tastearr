@@ -297,7 +297,18 @@ describe("mapping tables", () => {
     assert.equal(t.byAnilist.has(9), false);
   });
 
-  test.todo("BUG: an AniList id listed twice in the community list with different TVDB ids stays in the first series' byTvdb list");
+  test("an AniList id listed twice with different TVDB ids leaves the first series' byTvdb list (was todo #4)", () => {
+    const t = buildTables([row(8, 70, 1), row(1, 70, 1), row(8, 71, 2)], []);
+    assert.deepEqual(t.byTvdb.get(70), [1], "no longer listed under the series it moved away from");
+    assert.deepEqual(t.byTvdb.get(71), [8]);
+    assert.deepEqual(t.byAnilist.get(8), { tvdbId: 71, season: 2 });
+  });
+
+  test("an AniList id listed twice for the same series appears once in its byTvdb list", () => {
+    const t = buildTables([row(8, 70, 1), row(8, 70, 2)], []);
+    assert.deepEqual(t.byTvdb.get(70), [8]);
+    assert.deepEqual(t.byAnilist.get(8), { tvdbId: 70, season: 2 });
+  });
 
   test("place: moving an id removes it from the old series, is idempotent, and works for unseen ids", () => {
     const t = buildTables([row(1, 100, 1), row(2, 100, 2)], []);

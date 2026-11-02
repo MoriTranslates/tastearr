@@ -1,7 +1,7 @@
 import { anilistUserList } from "../adapters/anilist.js";
 import { malUserList } from "../adapters/mal.js";
 import { fail } from "../core/errors.js";
-import { listEntries, replaceListEntries, type ListRow } from "../data/lists.js";
+import { clearListEntries, listEntries, replaceListEntries, type ListRow } from "../data/lists.js";
 import { mappingTables } from "./mapping.js";
 import { getSettings } from "./settings.js";
 
@@ -53,6 +53,7 @@ export async function importMal(user: string, clientId: string): Promise<ImportR
  */
 export async function refreshListsDetailed(lists = getSettings().lists) {
   const { anilistUser, malUser, malClientId } = lists;
+  forgetUnconfiguredLists(lists);
   const imported: string[] = [];
   const errors: string[] = [];
   const one = async (name: string, run: () => Promise<ImportResult>) => {
@@ -65,6 +66,15 @@ export async function refreshListsDetailed(lists = getSettings().lists) {
   if (anilistUser) await one("AniList", () => importAnilist(anilistUser));
   if (malUser && malClientId) await one("MAL", () => importMal(malUser, malClientId));
   return { imported, errors };
+}
+
+/**
+ * Deletes the stored entries of a list whose username was cleared, so a list the user disconnected stops training the
+ * profile. Only an empty username counts: a missing MAL client ID means "can't import right now", and the last import
+ * is kept. Returns how many entries were removed.
+ */
+export function forgetUnconfiguredLists(lists = getSettings().lists) {
+  return (lists.anilistUser ? 0 : clearListEntries("anilist")) + (lists.malUser ? 0 : clearListEntries("mal"));
 }
 
 /** Re-imports whichever lists are configured; throws (after trying every list) when any of them failed. */
