@@ -22,7 +22,7 @@ import {
   trustProxyOption,
   verifyAction,
 } from "./auth.js";
-import { CONFIG_DIR, db, listJobs, setJob } from "./db.js";
+import { CONFIG_DIR, db, listJobs } from "./db.js";
 import { autoAddCandidates, autoAddHistory, firstOfMany, runAutoAdd } from "./autoadd.js";
 import { discover, useDiscovered } from "./discover.js";
 import { follow, followedIds, followedShows, unfollow } from "./following.js";

@@ -27,20 +27,20 @@ module.exports = {
       severity: "error",
       comment: "An adapter wraps one external service. It must not reach into the database, services or HTTP routes.",
       from: { path: layer("adapters") },
-      to: { path: ["^server/(services|http|data)/", "^server/index\.ts$"] },
+      to: { path: ["^server/(services|http|data)/", "^server/index[.]ts$"] },
     },
     {
       name: "data-is-a-leaf",
       severity: "error",
       comment: "The data layer is SQL only; it must not call services, adapters or routes.",
       from: { path: layer("data") },
-      to: { path: ["^server/(services|http|adapters)/", "^server/index\.ts$"] },
+      to: { path: ["^server/(services|http|adapters)/", "^server/index[.]ts$"] },
     },
     {
       name: "services-not-to-http",
       severity: "error",
       from: { path: layer("services") },
-      to: { path: ["^server/http/", "^server/index\.ts$"] },
+      to: { path: ["^server/http/", "^server/index[.]ts$"] },
     },
     {
       name: "http-goes-through-services",

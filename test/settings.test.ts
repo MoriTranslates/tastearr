@@ -42,6 +42,7 @@ test("first read creates the keys and signing secret", () => {
 test("publicSettings never sends a secret, hash or signing key to the browser", async () => {
   await setAccount("owner", "password123");
   secrets();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- typed once the API types are shared
   const p = publicSettings() as Record<string, any>;
   const text = JSON.stringify(p);
   const s = getSettings();

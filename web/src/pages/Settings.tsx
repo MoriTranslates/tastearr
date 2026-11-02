@@ -379,7 +379,7 @@ function AutoAddCard({ s, save }: { s: S; save: (p: Partial<S>) => Promise<S> })
   );
 }
 
-function Security({ s, status, save }: { s: S; status: Status; save: (p: Partial<S>) => Promise<S> }) {
+function Security({ s, status, save: _save }: { s: S; status: Status; save: (p: Partial<S>) => Promise<S> }) {
   const toast = useToast();
   const [bypass, setBypass] = useState(s.auth.bypassLocal);
   const [acct, setAcct] = useState({ currentPassword: "", username: s.auth.username, password: "" });

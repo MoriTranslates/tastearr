@@ -40,7 +40,7 @@ async function refresh() {
       fs.writeFileSync(FILE + ".tmp", Buffer.from(await res.arrayBuffer()));
       fs.renameSync(FILE + ".tmp", FILE);
     } catch (e) {
-      if (!fs.existsSync(FILE)) throw new Error(`Could not download anime mapping list: ${(e as Error).message}`);
+      if (!fs.existsSync(FILE)) throw new Error(`Could not download anime mapping list: ${(e as Error).message}`, { cause: e });
       console.warn("Mapping list refresh failed, using cached copy:", (e as Error).message);
     }
   }
