@@ -36,15 +36,51 @@ await app.register(fastifyCookie);
 app.addHook("onRequest", guard);
 app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
   const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+  // fetch's own "can't connect" (from a call that didn't go through safeFetch): an outside service is down, not us.
+  const why = status === 500 ? fetchFailure(err) : null;
+  if (why) {
+    req.log.warn(errorForLog(err), "An outside service couldn't be reached");
+    return reply.code(502).send({ error: `An outside service couldn't be reached (${why}). Check that it is running.` });
+  }
   if (status === 500 && isInternal(err)) {
     // Node, SQLite or a library speaking, not our own wording: it can carry SQL, file paths or resolver details.
-    // The full error goes to the log; the browser gets a reference to find it there.
-    req.log.error({ err }, `Internal error (ref ${req.id})`);
+    // The details go to the log (credentials and tokens in URLs removed); the browser gets a reference to find them.
+    req.log.error(errorForLog(err), `Internal error (ref ${req.id})`);
     return reply.code(500).send({ error: `Something went wrong on the server. The Tastearr log has the details (ref ${req.id}).` });
   }
-  req.log.warn(err.message);
+  req.log.warn(redactUrls(err.message));
   return reply.code(status).send({ error: err.message });
 });
+
+/** "TypeError: fetch failed": the reason from its cause (ECONNREFUSED, ENOTFOUND ...), else null. */
+function fetchFailure(err: Error) {
+  if (!(err instanceof TypeError) || err.message !== "fetch failed") return null;
+  const cause = err.cause as { code?: unknown; message?: unknown } | undefined;
+  return String(cause?.code ?? cause?.message ?? "no connection");
+}
+
+/** Credentials (`user:pass@`) and token- or key-like query values in any URL in `text`, replaced by ***. */
+function redactUrls(text: string) {
+  return text
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, "$1***@")
+    .replace(/([?&][^=&\s]*(?:token|key|pass|secret|auth|sig)[^=&\s]*=)[^&\s#]+/gi, "$1***");
+}
+
+/**
+ * What the log keeps of an error: name, code, message and stack (URLs redacted, cause included the same way). Not the
+ * whole object: Node errors carry extra fields such as `input`, the raw URL with any credentials in it.
+ */
+export function errorForLog(err: unknown, depth = 0): Record<string, unknown> {
+  const e = err as Error & { code?: unknown; cause?: unknown };
+  const out: Record<string, unknown> = {
+    type: e?.name,
+    message: redactUrls(String(e?.message ?? err)),
+    ...(e?.code !== undefined ? { code: e.code } : {}),
+    ...(e?.stack ? { stack: redactUrls(e.stack) } : {}),
+  };
+  if (e?.cause && depth < 2) out.cause = errorForLog(e.cause, depth + 1);
+  return out;
+}
 
 /**
  * Errors not written for the user: JavaScript runtime errors (TypeError, RangeError ...) and system or SQLite errors

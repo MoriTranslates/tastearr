@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
+import { fail } from "../core/errors.js";
 import { blockedHost, checkOutbound, OutboundError } from "../core/outbound.js";
 
 /**
@@ -49,12 +50,34 @@ export async function resolveOutbound(url: string, what = "That address"): Promi
 
 const MAX_REDIRECTS = 3;
 
+/**
+ * fetch's own failures, said for the user: "TypeError: fetch failed" (the reason, e.g. ECONNREFUSED, is in `cause`)
+ * becomes a 502 naming the service, a timeout a 504 (still named TimeoutError). Anything else is passed on as it is.
+ */
+function unreachable(e: unknown, what: string): unknown {
+  const err = e as Error & { cause?: { code?: string; message?: string } };
+  if (err?.name === "TimeoutError" || err?.name === "AbortError")
+    return Object.assign(fail(`${what} didn't answer in time. Check that it is running.`, 504), { name: "TimeoutError", cause: e });
+  if (err instanceof TypeError && err.message === "fetch failed") {
+    const why = err.cause?.code ?? err.cause?.message ?? "no connection";
+    return Object.assign(fail(`${what} can't be reached (${why}). Check that it is running and its address in Settings.`, 502), {
+      cause: e,
+    });
+  }
+  return e;
+}
+
 /** `fetch` to a user-configured address: resolved and checked first, redirects only to the same host. */
 export async function safeFetch(url: string, init: RequestInit, what: string): Promise<Response> {
   let target = await resolveOutbound(url, what);
   const host = target.hostname;
   for (let hop = 0; ; hop++) {
-    const res = await fetch(target, { ...init, redirect: "manual" });
+    let res: Response;
+    try {
+      res = await fetch(target, { ...init, redirect: "manual" });
+    } catch (e) {
+      throw unreachable(e, what);
+    }
     const loc = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
     if (!loc) return res;
     const next = new URL(loc, target);
