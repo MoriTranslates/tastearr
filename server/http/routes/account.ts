@@ -2,12 +2,14 @@ import type { FastifyInstance } from "fastify";
 import type { Status } from "../../../shared/api.js";
 import { VERSION } from "../../config.js";
 import { isPrivateIp } from "../../core/network.js";
-import { checkPassword, safeEqual } from "../../core/secrets.js";
+import { safeEqual } from "../../core/secrets.js";
 import { noteProxy, signedInStatus } from "../../services/health.js";
 import { revokeSession } from "../../services/sessions.js";
 import { getSettings, patchSettings, setAccount, setBypassLocal } from "../../services/settings.js";
 import {
   authState,
+  checkLoginSize,
+  checkPasswordLimited,
   COOKIE,
   csrfOk,
   hostAllowed,
@@ -18,6 +20,9 @@ import {
   SETUP_TOKEN,
 } from "../auth.js";
 import { fail, sessionCookie } from "../util.js";
+
+/** Login, setup and account bodies are a few short strings: no need to parse the app-wide 1 MB. */
+const AUTH_BODY_LIMIT = 8_192;
 
 /** Status, first-run setup, login/logout and account changes. */
 export function accountRoutes(app: FastifyInstance) {
@@ -31,7 +36,7 @@ export function accountRoutes(app: FastifyInstance) {
   let settingUp = false;
   app.post<{ Body: { username?: string; password?: string; bypassLocal?: boolean; setupToken?: string } }>(
     "/api/auth/setup",
-    { config: { setup: true } },
+    { config: { setup: true }, bodyLimit: AUTH_BODY_LIMIT },
     async (req, reply) => {
       if (getSettings().auth.passwordHash || settingUp) throw fail("Account already exists", 409);
       if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
@@ -41,6 +46,7 @@ export function accountRoutes(app: FastifyInstance) {
         throw fail("Open Tastearr from your home network to create the account, or enter the setup code from the container log", 403);
       const username = String(req.body?.username ?? "").trim();
       const password = String(req.body?.password ?? "");
+      checkLoginSize(username, password);
       if (!username || password.length < 8) throw fail("Choose a username and a password of at least 8 characters");
       settingUp = true;
       try {
@@ -54,20 +60,27 @@ export function accountRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Body: { username?: string; password?: string } }>("/api/auth/login", { config: { setup: true } }, async (req, reply) => {
-    if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
-    // Only a real proxy (a LAN peer adding the header) counts; a forged header from outside can't raise the banner.
-    if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) && isPrivateIp(req.socket.remoteAddress ?? ""))
-      noteProxy();
-    if (!loginAllowed(req.ip, String(req.body?.username ?? ""))) throw fail("Too many attempts, wait a few seconds and try again", 429);
-    const a = getSettings().auth;
-    const okUser = safeEqual(String(req.body?.username ?? ""), a.username);
-    const okPass = await checkPassword(String(req.body?.password ?? ""), a.passwordHash || "00:00");
-    if (!okUser || !okPass) throw fail("Wrong username or password", 401);
-    loginSucceeded(req.ip, a.username);
-    sessionCookie(req, reply, a.username);
-    return { ok: true };
-  });
+  app.post<{ Body: { username?: string; password?: string } }>(
+    "/api/auth/login",
+    { config: { setup: true }, bodyLimit: AUTH_BODY_LIMIT },
+    async (req, reply) => {
+      if (!csrfOk(req)) throw fail("Cross-site request blocked", 403);
+      // Only a real proxy (a LAN peer adding the header) counts; a forged header from outside can't raise the banner.
+      if (!PROXY_TRUSTED && (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) && isPrivateIp(req.socket.remoteAddress ?? ""))
+        noteProxy();
+      const username = String(req.body?.username ?? "");
+      const password = String(req.body?.password ?? "");
+      checkLoginSize(username, password);
+      if (!loginAllowed(req.ip, username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
+      const a = getSettings().auth;
+      const okUser = safeEqual(username, a.username);
+      const okPass = await checkPasswordLimited(password, a.passwordHash || "00:00");
+      if (!okUser || !okPass) throw fail("Wrong username or password", 401);
+      loginSucceeded(req.ip, a.username);
+      sessionCookie(req, reply, a.username);
+      return { ok: true };
+    },
+  );
 
   app.post("/api/auth/logout", async (req, reply) => {
     revokeSession(req.cookies[COOKIE]);
@@ -75,20 +88,27 @@ export function accountRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.put<{ Body: { currentPassword?: string; username?: string; password?: string } }>("/api/auth/account", async (req, reply) => {
-    const a = getSettings().auth;
-    // Same throttle as login: a stolen session cookie shouldn't allow unlimited password guesses.
-    if (!loginAllowed(req.ip, a.username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
-    if (!(await checkPassword(String(req.body?.currentPassword ?? ""), a.passwordHash))) throw fail("Current password is wrong", 403);
-    loginSucceeded(req.ip, a.username);
-    const username = String(req.body?.username ?? a.username).trim() || a.username;
-    const password = String(req.body?.password ?? "");
-    if (password && password.length < 8) throw fail("New password must be at least 8 characters");
-    if (password) await setAccount(username, password);
-    else patchSettings((s) => ({ ...s, auth: { ...s.auth, username } }));
-    sessionCookie(req, reply, username); // changing the password rotated the signing secret
-    return { ok: true };
-  });
+  app.put<{ Body: { currentPassword?: string; username?: string; password?: string } }>(
+    "/api/auth/account",
+    { bodyLimit: AUTH_BODY_LIMIT },
+    async (req, reply) => {
+      const a = getSettings().auth;
+      const current = String(req.body?.currentPassword ?? "");
+      const username = String(req.body?.username ?? a.username).trim() || a.username;
+      const password = String(req.body?.password ?? "");
+      checkLoginSize(username, current);
+      checkLoginSize(username, password);
+      // Same throttle as login: a stolen session cookie shouldn't allow unlimited password guesses.
+      if (!loginAllowed(req.ip, a.username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
+      if (!(await checkPasswordLimited(current, a.passwordHash))) throw fail("Current password is wrong", 403);
+      loginSucceeded(req.ip, a.username);
+      if (password && password.length < 8) throw fail("New password must be at least 8 characters");
+      if (password) await setAccount(username, password);
+      else patchSettings((s) => ({ ...s, auth: { ...s.auth, username } }));
+      sessionCookie(req, reply, username); // changing the password rotated the signing secret
+      return { ok: true };
+    },
+  );
 
   /** "Authentication required" mode. Needs a real login session, so a bypassed LAN device can't turn the bypass on. */
   app.put<{ Body: { bypassLocal?: boolean } }>("/api/auth/mode", async (req) => {
