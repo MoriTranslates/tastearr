@@ -24,7 +24,17 @@ export interface SeriesLibrary {
   failedNames: string[];
 }
 
+/**
+ * How long a library read is reused: a complete one for `completeMs`, a partial one (an extra instance down) for
+ * `partialMs`, so display calls don't wait on the dead instance every time but notice it coming back soon. Tests
+ * shrink these.
+ */
+export const SERIES_CACHE = { completeMs: 5 * 60_000, partialMs: 60_000 };
+
 let seriesCache: { at: number; lib: SeriesLibrary } | null = null;
+/** A read in progress, shared by callers that arrive meanwhile; `gen` drops it once a write invalidated the cache. */
+let seriesReading: { gen: number; p: Promise<SeriesLibrary> } | null = null;
+let seriesGen = 0;
 
 /** A series' `instance` is the address of the Sonarr it lives in (empty = the main one). */
 function connOf(instance = ""): ArrConn {
@@ -37,15 +47,32 @@ function connOf(instance = ""): ArrConn {
 
 export function forgetSeries() {
   seriesCache = null;
+  seriesGen++;
 }
 
 /**
  * Every series across all Sonarr instances, and which instances failed. The main instance wins when the same show is
- * in two. The main instance failing throws; an extra one failing is reported in `failed`. A partial list is not
- * cached, so the next call tries the missing instance again.
+ * in two. The main instance failing throws; an extra one failing is reported in `failed`. A partial list is cached for
+ * a shorter time (SERIES_CACHE) and is only for display: `completeSonarrLibrary` never uses it.
  */
 export async function sonarrLibrary(force = false): Promise<SeriesLibrary> {
-  if (!force && seriesCache && Date.now() - seriesCache.at < 5 * 60_000) return seriesCache.lib;
+  if (!force && seriesCache) {
+    const ttl = seriesCache.lib.failed.length ? SERIES_CACHE.partialMs : SERIES_CACHE.completeMs;
+    if (Date.now() - seriesCache.at < ttl) return seriesCache.lib;
+  }
+  if (seriesReading?.gen === seriesGen) return seriesReading.p;
+  const gen = seriesGen;
+  const p = readLibrary().then((lib) => {
+    if (gen === seriesGen) seriesCache = { at: Date.now(), lib };
+    return lib;
+  });
+  seriesReading = { gen, p };
+  // Only clears the shared slot; the caller gets the same promise and sees any error.
+  void p.finally(() => seriesReading?.p === p && (seriesReading = null)).catch(() => undefined);
+  return p;
+}
+
+async function readLibrary(): Promise<SeriesLibrary> {
   const list = (await sonarr.allSeries(getSettings().sonarr)).map((x) => ({ ...x, instance: "" }));
   const have = new Set(list.map((x) => x.tvdbId));
   const extra = getSettings().sonarrExtra;
@@ -60,9 +87,7 @@ export async function sonarrLibrary(force = false): Promise<SeriesLibrary> {
     }
   }
   for (const f of failed) console.warn(f);
-  const lib = { list, failed, failedNames };
-  seriesCache = failed.length ? null : { at: Date.now(), lib };
-  return lib;
+  return { list, failed, failedNames };
 }
 
 /** Every series that could be read (possibly partial, see `sonarrLibrary`): for display, never for "is it owned?" before a write. */
@@ -70,9 +95,13 @@ export async function sonarrSeries(force = false): Promise<SonarrSeries[]> {
   return (await sonarrLibrary(force)).list;
 }
 
-/** The library, refusing while any instance can't be read: for deciding between "add" and "monitor" before a write. */
+/**
+ * The library, refusing while any instance can't be read: for deciding between "add" and "monitor" before a write.
+ * A cached partial read is never trusted here (it may be stale either way): it reads every instance again.
+ */
 export async function completeSonarrLibrary(force = false): Promise<SonarrSeries[]> {
-  const lib = await sonarrLibrary(force);
+  let lib = await sonarrLibrary(force);
+  if (lib.failed.length && !force) lib = await sonarrLibrary(true);
   if (lib.failed.length) throw ownershipUnknown(lib.failed);
   return lib.list;
 }
@@ -172,7 +201,7 @@ export async function addSeries(
     if (!there) throw e;
     added = there;
   } finally {
-    seriesCache = null;
+    forgetSeries();
   }
   return {
     id: added.id,
@@ -224,7 +253,7 @@ export async function setMonitored(seriesId: number, monitored: boolean, instanc
   const c = connOf(instance);
   const full = await sonarr.getSeries(c, seriesId);
   await sonarr.putSeries(c, seriesId, { ...full, monitored });
-  seriesCache = null;
+  forgetSeries();
 }
 
 /** Whether monitoring a season would also switch an unmonitored series back on (shown in the confirm dialog). */
@@ -270,6 +299,6 @@ export async function monitorSeason(tvdbId: number, season: number, search = get
   await sonarr.putSeries(c, s.id, full);
   removeDropped(tvdbId);
   if (target && search) await sonarr.command(c, { name: "SeasonSearch", seriesId: s.id, seasonNumber: season });
-  seriesCache = null;
+  forgetSeries();
   return { id: s.id, title: s.title, season, waitingForSeason: !target, resumedSeries: resumed };
 }
