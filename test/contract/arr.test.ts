@@ -73,7 +73,7 @@ describe("Sonarr", () => {
 
   test("malformed JSON rejects; an empty body (204-style) resolves to undefined", async () => {
     mode = (_req, res) => reply(res, 200, "{not json");
-    await assert.rejects(sonarr.allSeries(conn()), SyntaxError);
+    await assert.rejects(sonarr.allSeries(conn()), /Sonarr GET \/series answered with something that isn't JSON; check the address/);
     mode = (_req, res) => reply(res, 200, "");
     assert.equal(await sonarr.putSeries(conn(), 1, { id: 1 }), undefined);
   });
@@ -128,7 +128,7 @@ describe("Radarr", () => {
       await assert.rejects(radarr.allMovies(conn()), new RegExp(`Radarr GET /movie failed \\(HTTP ${code}\\)`));
     }
     mode = (_req, res) => reply(res, 200, "<html>");
-    await assert.rejects(radarr.allMovies(conn()), SyntaxError);
+    await assert.rejects(radarr.allMovies(conn()), /Radarr GET \/movie answered with something that isn't JSON/);
     mode = (_req, res) => reply(res, 200, []);
     assert.deepEqual(await radarr.allMovies(conn()), []);
   });

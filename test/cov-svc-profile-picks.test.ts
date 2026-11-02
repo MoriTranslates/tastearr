@@ -77,25 +77,41 @@ describe("profile build", () => {
     assert.deepEqual(storedProfile(), before);
   });
 
-  test("a failing list import is a warning, not a failed build", async () => {
+  test("a failing list import is a recorded problem, not a failed build", async () => {
     await importAnilist("adam");
     w.fail.anilistList = 500;
-    const { value: p, warnings } = await quietWarn(() => buildProfile());
+    const p = await buildProfile();
     assert.ok(p.trainedOn > 0);
     assert.equal(listEntries().length, 14, "the earlier import is kept when the refresh fails");
-    assert.ok(warnings.some((x) => /List import failed/.test(x)));
-    assert.equal(listJobs().find((j) => j.name === "profile")!.state, "done");
+    const job = listJobs().find((j) => j.name === "profile")!;
+    assert.equal(job.state, "done");
+    assert.match(job.detail ?? "", /1 problem, see the last error/);
+    assert.match(job.lastError ?? "", /list import failed \(keeping the last import\): AniList: /);
+    assert.ok(job.lastErrorAt);
   });
 
-  test("AniList season download failing marks the job as error and keeps the previous profile", async () => {
-    const good = await buildProfile();
+  test("one AniList season failing is skipped and recorded; the build still succeeds from the rest", async () => {
+    await buildProfile();
     w.fail.anilistSeason = 503;
     // The season is cached from the first build; ask for a season that is not.
     patchSettings((s) => ({ ...s, training: { ...s.training, seasons: 3 } }));
-    await assert.rejects(buildProfile(), /having trouble/);
+    const p = await buildProfile();
+    assert.ok(p.trainedOn > 0);
     const job = listJobs().find((j) => j.name === "profile")!;
-    assert.equal(job.state, "error");
-    assert.match(job.detail ?? "", /having trouble/);
+    assert.equal(job.state, "done");
+    assert.match(job.lastError ?? "", /skipped: .*having trouble/);
+    assert.equal(storedProfile()!.builtAt, p.builtAt);
+  });
+
+  test("no AniList season readable at all marks the job as error and keeps the previous profile", async () => {
+    const good = await buildProfile();
+    w.fail.anilistSeason = 503;
+    // Only seasons that were never downloaded, so there is no cached copy to fall back on.
+    patchSettings((s) => ({ ...s, training: { ...s.training, seasons: 1 } }));
+    await assert.rejects(
+      buildProfile({ until: { season: "WINTER", year: 2001 } }),
+      /Couldn't read any season from AniList: .*having trouble/,
+    );
     assert.equal(storedProfile()!.builtAt, good.builtAt, "old profile untouched");
   });
 

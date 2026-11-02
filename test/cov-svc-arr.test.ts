@@ -196,7 +196,7 @@ describe("Radarr service", () => {
     assert.equal(net.seen.length, calls, "second call served from cache");
     net.tagFail = true;
     const r = await addMovie({ tmdbId: 372058 });
-    assert.deepEqual(r, { id: 77, title: "君の名は。" });
+    assert.deepEqual(r, { id: 77, title: "君の名は。", alreadyAdded: false });
     const post = net.seen.filter((x) => x.method === "POST" && x.url.endsWith("/movie")).at(-1)!.body as Record<string, unknown>;
     assert.deepEqual(post.tags, [3]);
     assert.equal(post.monitored, true);

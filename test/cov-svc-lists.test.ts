@@ -90,16 +90,21 @@ describe("list sync", () => {
     assert.deepEqual(await refreshLists(), [], "a MAL user without a client id is skipped");
   });
 
-  test("refreshLists: AniList failing means MAL is not even tried (one source failing skips the other)", async () => {
+  test("refreshLists: AniList failing still imports MAL, then reports the AniList failure (one source never skips the other)", async () => {
     patchSettings((s) => ({ ...s, lists: { anilistUser: "adam", malUser: "adam", malClientId: "cid" } }));
     w.malList = [{ id: 1010, status: "completed", score: 9, eps: 1 }];
     w.fail.anilistList = 500;
-    await assert.rejects(refreshLists());
-    // Documents today's behaviour. The failure-isolation wanted by the brief is the todo below.
-    assert.equal(listEntries().filter((e) => e.source === "mal").length, 0);
+    await assert.rejects(refreshLists(), (e: Error) => /^AniList: /.test(e.message) && /imported 1 MAL entries/.test(e.message));
+    assert.equal(listEntries().filter((e) => e.source === "mal").length, 1);
   });
 
-  test.todo("BUG: refreshLists should still import MAL when AniList fails (it throws on the first failure)");
+  test("refreshLists: MAL failing after AniList keeps the AniList import and names MAL as the failure", async () => {
+    patchSettings((s) => ({ ...s, lists: { anilistUser: "adam", malUser: "adam", malClientId: "cid" } }));
+    w.anilistList = [{ mediaId: 1, status: "COMPLETED", score: 80, progress: 1 }];
+    w.fail.mal = 500;
+    await assert.rejects(refreshLists(), (e: Error) => /^MAL: .*HTTP 500/.test(e.message) && /imported 1 AniList entries/.test(e.message));
+    assert.equal(listEntries().filter((e) => e.source === "anilist").length, 1);
+  });
 });
 
 describe("season announcement", () => {

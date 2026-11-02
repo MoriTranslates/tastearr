@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { jellyfinInfo, jellyfinLibraries, jellyfinUsers, jellyfinWatchStates } from "../../server/adapters/jellyfin.js";
 import { plexCheckPin, plexCreatePin, plexInfo, plexLibraries, plexServers, plexWatchStates } from "../../server/adapters/plex.js";
+import type { ShowIdTables } from "../../server/adapters/showids.js";
 import {
   jfInfo,
   jfSeasons,
@@ -30,6 +31,14 @@ after(async () => {
   await srv.close();
 });
 const plex = () => ({ url: srv.url, token: "pt" });
+/** Mapping-list lookups for shows a media server filed without a TVDB id; empty unless a test fills a column. */
+const tables = (t: Partial<ShowIdTables> = {}): ShowIdTables => ({
+  anidb: new Map(),
+  tmdb: new Map(),
+  imdb: new Map(),
+  anilist: new Map(),
+  ...t,
+});
 const jf = () => ({ url: srv.url, token: "jt", userId: "u1" });
 
 /** 401/404/429/5xx name the status, malformed JSON rejects, a hung server times out. */
@@ -57,7 +66,7 @@ describe("Plex", () => {
 
   test("watch states: new agent, legacy agent, HAMA, and shows with no id; seasons only with progress", async () => {
     mode = (req, res) => reply(res, 200, req.path.includes("/children") ? plexSeasons : plexShows);
-    const m = await plexWatchStates(plex(), ["2"], new Map([[4521, 5555]]));
+    const m = await plexWatchStates(plex(), ["2"], tables({ anidb: new Map([[4521, 5555]]) }));
     assert.deepEqual(
       [...m.keys()].sort((a, b) => a - b),
       [81797, 5555, 424536].sort((a, b) => a - b),
@@ -73,16 +82,16 @@ describe("Plex", () => {
 
   test("an unknown HAMA id is skipped; an empty library is an empty map", async () => {
     mode = (_req, res) => reply(res, 200, plexShows);
-    const m = await plexWatchStates(plex(), ["2"], new Map());
+    const m = await plexWatchStates(plex(), ["2"], tables());
     assert.equal(m.size, 2);
     mode = (_req, res) => reply(res, 200, { MediaContainer: {} });
-    assert.equal((await plexWatchStates(plex(), ["2"], new Map())).size, 0);
+    assert.equal((await plexWatchStates(plex(), ["2"], tables())).size, 0);
     assert.deepEqual(await plexLibraries(plex()), []);
   });
 
   test("one season request failing keeps the show, just without season detail", async () => {
     mode = (req, res) => (req.path.includes("/children") ? reply(res, 500, {}) : reply(res, 200, plexShows));
-    const m = await plexWatchStates(plex(), ["2"], new Map());
+    const m = await plexWatchStates(plex(), ["2"], tables());
     assert.equal(m.get(424536)!.watched, 12);
     assert.equal(m.get(424536)!.seasons.size, 0);
   });
@@ -140,7 +149,7 @@ describe("Jellyfin", () => {
 
   test("watch states: favourite counts as 10, unwatched has no season request, specials without index skipped", async () => {
     mode = (req, res) => reply(res, 200, req.path.startsWith("/Shows/") ? jfSeasons : jfSeries);
-    const m = await jellyfinWatchStates(jf(), ["v1"]);
+    const m = await jellyfinWatchStates(jf(), ["v1"], tables());
     assert.deepEqual(
       [...m.keys()].sort((a, b) => a - b),
       [999, 424536],
@@ -154,17 +163,23 @@ describe("Jellyfin", () => {
     assert.equal(m.get(999)!.seasons.size, 0);
   });
 
+  test("a show with only an IMDb id is mapped through the mapping list instead of dropped", async () => {
+    mode = (req, res) => reply(res, 200, req.path.startsWith("/Shows/") ? { Items: [] } : jfSeries);
+    const m = await jellyfinWatchStates(jf(), ["v1"], tables({ imdb: new Map([["tt1", 777]]) }));
+    assert.equal(m.get(777)!.title, "No tvdb");
+  });
+
   test("empty libraries and no user selected", async () => {
     mode = (_req, res) => reply(res, 200, { Items: [] });
-    assert.equal((await jellyfinWatchStates(jf(), ["v1"])).size, 0);
+    assert.equal((await jellyfinWatchStates(jf(), ["v1"], tables())).size, 0);
     assert.deepEqual(await jellyfinLibraries(jf()), []);
-    await assert.rejects(jellyfinWatchStates({ ...jf(), userId: "" }, ["v1"]), /Pick a Jellyfin user/);
+    await assert.rejects(jellyfinWatchStates({ ...jf(), userId: "" }, ["v1"], tables()), /Pick a Jellyfin user/);
     await assert.rejects(jellyfinLibraries({ ...jf(), userId: "" }), /Pick a Jellyfin user/);
   });
 
   test("a user id with odd characters is URL-encoded", async () => {
     mode = (_req, res) => reply(res, 200, { Items: [] });
-    await jellyfinWatchStates({ ...jf(), userId: "a/b c" }, ["x&y"]);
+    await jellyfinWatchStates({ ...jf(), userId: "a/b c" }, ["x&y"], tables());
     assert.match(srv.seen.at(-1)!.path, /^\/Users\/a%2Fb%20c\/Items\?ParentId=x%26y/);
   });
 

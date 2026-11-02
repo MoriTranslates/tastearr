@@ -4,7 +4,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { airedBetween, anilistUserList, fetchByIds, fetchSeason, popularIdsBatch, searchTitle } from "../../server/adapters/anilist.js";
+import {
+  ANILIST_LIMITS,
+  airedBetween,
+  anilistUserList,
+  fetchByIds,
+  fetchSeason,
+  popularIdsBatch,
+  searchTitle,
+} from "../../server/adapters/anilist.js";
 import { animeListAge, downloadAnimeList, readAnimeList } from "../../server/adapters/animelists.js";
 import { malUserList } from "../../server/adapters/mal.js";
 import { cjkMedia, malPage1, malPage2, page, userList } from "../fixtures/anilist.ts";
@@ -93,8 +101,19 @@ describe("AniList", () => {
   test("429 forever gives up with a readable error instead of looping", async () => {
     const m = mockFetch(() => reply("slow down", 429, { "retry-after": "1" }));
     try {
-      await assert.rejects(searchTitle("x"), /refused the request \(HTTP 429\)/);
-      assert.equal(m.calls.length, 6);
+      await assert.rejects(searchTitle("x"), /AniList's rate limit was hit; try again in 1 seconds/);
+      assert.equal(m.calls.length, ANILIST_LIMITS.retries + 1);
+    } finally {
+      m.restore();
+    }
+  });
+
+  test("a Retry-After longer than the longest wait fails at once with when to try again", async () => {
+    const m = mockFetch(() => reply("slow down", 429, { "retry-after": "600" }));
+    try {
+      await assert.rejects(searchTitle("x"), /rate limit was hit; try again in 600 seconds/);
+      assert.equal(m.calls.length, 1);
+      assert.ok(!waits.includes(600_000), `waited ${waits}`);
     } finally {
       m.restore();
     }
@@ -130,7 +149,7 @@ describe("AniList", () => {
     });
     try {
       await assert.rejects(searchTitle("a"), /AniList: Too Many Requests/);
-      await assert.rejects(searchTitle("b"), SyntaxError);
+      await assert.rejects(searchTitle("b"), (e: Error) => /isn't valid JSON/.test(e.message) && e.cause instanceof SyntaxError);
       assert.equal((await searchTitle("c"))[0].id, 5);
     } finally {
       m.restore();
@@ -227,7 +246,20 @@ describe("AniList", () => {
     }
   });
 
-  test.todo("BUG: a reply without X-RateLimit-Remaining is treated as 'remaining = 0' and delays the next call by ~60 s");
+  test("a reply without X-RateLimit headers does not stall the next call for a minute", async () => {
+    const m = mockFetch(() => new Response(JSON.stringify(page([media(1)])), { status: 200 }));
+    try {
+      await searchTitle("a");
+      await searchTitle("b");
+      assert.equal(m.calls.length, 2);
+      assert.ok(
+        waits.every((ms) => ms < 10_000),
+        `waited ${waits}`,
+      );
+    } finally {
+      m.restore();
+    }
+  });
 });
 
 describe("MyAnimeList", () => {
@@ -275,7 +307,10 @@ describe("MyAnimeList", () => {
   test("malformed JSON rejects and a paging loop is capped at 20 pages", async () => {
     let m = mockFetch(() => new Response("<html>", { status: 200 }));
     try {
-      await assert.rejects(malUserList("u", "c"), SyntaxError);
+      await assert.rejects(
+        malUserList("u", "c"),
+        (e: Error) => /MyAnimeList sent an answer that isn't valid JSON/.test(e.message) && e.cause instanceof SyntaxError,
+      );
     } finally {
       m.restore();
     }
@@ -333,5 +368,18 @@ describe("anime-list download", () => {
     assert.equal(readAnimeList(file).length, 1);
   });
 
-  test.todo("BUG: a download that completes but is not valid JSON (e.g. an HTML error page with HTTP 200) replaces the good list");
+  test("a download that completes but is not a JSON list (an HTML page with HTTP 200, an object) never replaces the good list", async () => {
+    for (const [body, why] of [
+      ["<!doctype html><html><body>Sign in to the Wi-Fi</body></html>".repeat(50), /isn't valid JSON/],
+      [JSON.stringify({ message: "rate limited" }).padEnd(4000), /isn't a list/],
+    ] as const) {
+      const m = mockFetch(() => new Response(body, { status: 200 }));
+      try {
+        await assert.rejects(downloadAnimeList(file), why);
+      } finally {
+        m.restore();
+      }
+      assert.equal(readAnimeList(file).length, 1);
+    }
+  });
 });
