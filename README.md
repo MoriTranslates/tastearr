@@ -83,7 +83,7 @@ services:
 | `TASTEARR_APPDATA` | `/appdata` | Where "Find my apps" looks for Sonarr's `config.xml` |
 | `TRUST_PROXY` | | Your reverse proxy's IP/CIDR (e.g. `172.18.0.0/16`) or a hop count. `true` is refused because it would let anyone fake their IP. |
 | `TASTEARR_ALLOWED_HOSTS` | | Extra hostnames allowed for the local-network login bypass (see Security) |
-| `TASTEARR_LOCAL_NETWORKS` | | Your home network as comma-separated IPv4 CIDRs, if it isn't in `10.0.0.0/8` or `192.168.0.0/16` (e.g. `172.20.0.0/16`). Replaces the defaults. |
+| `TASTEARR_LOCAL_NETWORKS` | | Your home network as comma-separated IPv4 CIDRs, if it isn't in `10.0.0.0/8` or `192.168.0.0/16`. Replaces the defaults. Docker's `172.16.0.0/12` and loopback never count, even when listed. |
 | `UMASK` | | Permission mask for files in `/config`, e.g. `002` |
 
 `GET /ping` answers `{"status":"OK"}` without a login, for Docker health checks and Uptime Kuma.

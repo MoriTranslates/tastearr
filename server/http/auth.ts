@@ -59,22 +59,28 @@ const FORWARD_HEADERS = [
 ];
 
 /**
- * "Disabled for local addresses": the request must come from a private IP, and must not have passed through
- * an untrusted proxy (a reverse proxy or tunnel would otherwise make the whole internet look local).
+ * "Disabled for local addresses": the device itself must be on the home network and talking to us directly.
+ * - Any forwarding header means a proxy or tunnel relayed the request, whatever TRUST_PROXY says (with a proxy list
+ *   set, a LAN relay that isn't on the list used to be judged by the address it was relaying for).
+ * - The socket peer is judged, never `req.ip` (which TRUST_PROXY may take from a header).
+ * - A listed proxy, a hop-count TRUST_PROXY (it trusts whatever is in front blindly), Docker's 172.16/12 and loopback
+ *   never get the bypass, even when TASTEARR_LOCAL_NETWORKS lists those ranges.
  */
 export function isLocalRequest(req: FastifyRequest) {
-  const trust = trustProxyOption();
-  if (trust === false && FORWARD_HEADERS.some((h) => req.headers[h])) return false;
-  // A hop-count TRUST_PROXY trusts whatever is in front blindly (a forged X-Forwarded-For would read as local).
-  if (typeof trust === "number") return false;
-  return isHomeNetwork(req.ip) && !isProxyPeer(req.socket?.remoteAddress ?? "");
+  if (FORWARD_HEADERS.some((h) => req.headers[h])) return false;
+  if (typeof trustProxyOption() === "number") return false;
+  const peer = req.socket?.remoteAddress ?? "";
+  const v4peer = peer.startsWith("::ffff:") ? peer.slice(7) : peer;
+  if (inCidr(v4peer, "172.16.0.0/12")) return false;
+  return isHomeNetwork(v4peer) && !isProxyPeer(peer);
 }
 
 /**
  * The home network, for the "disabled for local addresses" bypass and for claiming a fresh install: 10/8, 192.168/16
  * and IPv6 ULA/link-local by default. 172.16/12 (Docker's own networks: Docker's NAT gateway or docker-proxy, e.g. for
  * IPv6 or Docker Desktop, would make internet requests arrive from 172.17.0.1) and loopback (a tunnel or proxy on the
- * same host) never count, unless TASTEARR_LOCAL_NETWORKS lists them (comma-separated IPv4 CIDRs).
+ * same host) are not in the defaults. TASTEARR_LOCAL_NETWORKS (comma-separated IPv4 CIDRs) replaces the defaults, but
+ * isLocalRequest still refuses 172.16/12 and loopback peers.
  */
 export function isHomeNetwork(ip: string) {
   const custom = (process.env.TASTEARR_LOCAL_NETWORKS ?? "")
