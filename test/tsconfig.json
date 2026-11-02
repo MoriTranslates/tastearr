@@ -5,5 +5,5 @@
     "rootDir": "..",
     "allowImportingTsExtensions": true
   },
-  "include": ["../server", "."]
+  "include": ["../server", "../shared", "."]
 }

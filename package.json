@@ -15,7 +15,11 @@
     "start": "node --no-warnings=ExperimentalWarning dist/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p test/tsconfig.json",
     "eval": "node --no-warnings=ExperimentalWarning dist/server/eval.js",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "lint": "node tools/lint/node_modules/eslint/bin/eslint.js -c tools/lint/eslint.config.js --max-warnings 0 . && node tools/lint/node_modules/prettier/bin/prettier.cjs --check .",
+    "format": "node tools/lint/node_modules/prettier/bin/prettier.cjs --write .",
+    "depcheck": "node tools/lint/node_modules/dependency-cruiser/bin/dependency-cruiser.mjs --config tools/lint/dependency-cruiser.cjs server shared web/src test",
+    "tools:install": "npm ci --prefix tools/lint --no-audit --no-fund"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",

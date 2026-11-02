@@ -137,7 +137,11 @@ TASTEARR_CONFIG=.devconfig npm run dev:server   # API on :8383
 npm run dev:web                                 # Vite on :5173, proxies /api
 npm run build && npm start
 npm test                                         # unit + route tests (no network)
+npm run tools:install                            # once: lint tooling (tools/lint)
+npm run lint && npm run depcheck                 # ESLint + Prettier, layer rules
 ```
+
+How the code is organised, and the rules CI enforces, are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Always run tests with `npm test`: it keeps every scratch folder in one temp directory and deletes it afterwards. Don't run `node --test` directly.
 

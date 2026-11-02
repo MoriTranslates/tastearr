@@ -1,10 +1,21 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { store } from "../server/anilist.js";
-import { patchSettings } from "../server/settings.js";
-import { labelOf, scoreCandidates, streamingLinks, toMatch, type Profile } from "../server/taste.js";
+import type { ScoredPick, TasteProfile as Profile } from "../shared/api.js";
+import { streamingLinks } from "../server/core/taste/features.js";
+import { labelOf as label } from "../server/core/taste/labels.js";
+import type { Media } from "../server/core/taste/media.js";
+import { scoreCandidates as score, toMatch, type ScoreOptions } from "../server/core/taste/score.js";
+import type { Ctx } from "../server/core/taste/types.js";
+import { storeMedia as store } from "../server/data/media.js";
+import { cachedMedia } from "../server/services/catalog.js";
+import { tasteEnv } from "../server/services/context.js";
+import { patchSettings } from "../server/services/settings.js";
 import { emptyCtx, media, tags } from "./helpers.ts";
+
+/** The engine with the app's current settings and media cache, as the picks service runs it. */
+const scoreCandidates = (c: Media[], p: Profile, ctx: Ctx, opts?: ScoreOptions): ScoredPick[] => score(c, p, ctx, tasteEnv(), opts);
+const labelOf = (id: number, ctx: Ctx) => label(id, ctx, cachedMedia);
 
 const stat = (lift: number) => ({ lift, n: 20, p: 20 * lift * 0.2 });
 const profile: Profile = {
@@ -38,7 +49,10 @@ test("a show matching what the user keeps outranks one matching what they skip",
   const [f, s] = scoreCandidates([fantasy, sports], profile, emptyCtx());
   assert.ok(f.match >= s.match + 20, `${f.match} vs ${s.match}`);
   assert.ok(f.score > s.score);
-  assert.deepEqual(f.reasons.map((r) => r.label), ["Isekai", "Magic", "Fantasy"]);
+  assert.deepEqual(
+    f.reasons.map((r) => r.label),
+    ["Isekai", "Magic", "Fantasy"],
+  );
   assert.ok(s.warnings.length > 0);
   assert.equal(f.similar, "Old Favourite");
   assert.equal(f.section, "new");
@@ -61,7 +75,12 @@ test("never-genres, kids and gore filters exclude a pick and say why", () => {
 });
 
 test("the user's own verdicts win: a thumbs-down is excluded and sinks; a heart lifts", () => {
-  const ctx = emptyCtx({ fb: new Map([[10, "disliked"], [11, "loved"]]) });
+  const ctx = emptyCtx({
+    fb: new Map([
+      [10, "disliked"],
+      [11, "loved"],
+    ]),
+  });
   const [f, s] = scoreCandidates([fantasy, sports], profile, ctx);
   assert.equal(f.excluded, "You marked this \u{1F44E}");
   assert.equal(f.verdict, "disliked");
@@ -71,8 +90,18 @@ test("the user's own verdicts win: a thumbs-down is excluded and sinks; a heart 
 });
 
 test("a direct sequel of a show the user loved is a continuing pick of at least 90%", () => {
-  const first = media(20, { title: { romaji: "Hero Saga", english: "Hero Saga", native: null }, status: "FINISHED", genres: ["Sports"], tags: tags("Baseball") });
-  const second = media(21, { title: { romaji: "Hero Saga 2", english: "Hero Saga Season 2", native: null }, genres: ["Sports"], tags: tags("Baseball", "School", "Team Sports", "Iyashikei"), relations: { edges: [{ relationType: "PREQUEL", node: { id: 20, type: "ANIME", format: "TV" } }] } });
+  const first = media(20, {
+    title: { romaji: "Hero Saga", english: "Hero Saga", native: null },
+    status: "FINISHED",
+    genres: ["Sports"],
+    tags: tags("Baseball"),
+  });
+  const second = media(21, {
+    title: { romaji: "Hero Saga 2", english: "Hero Saga Season 2", native: null },
+    genres: ["Sports"],
+    tags: tags("Baseball", "School", "Team Sports", "Iyashikei"),
+    relations: { edges: [{ relationType: "PREQUEL", node: { id: 20, type: "ANIME", format: "TV" } }] },
+  });
   store([first], null, null); // the prequel must be in the media cache
   const [p] = scoreCandidates([second], profile, emptyCtx({ fb: new Map([[20, "loved"]]) }));
   assert.equal(p.section, "continuing");
@@ -86,8 +115,14 @@ test("labels: explicit signals win over library data", () => {
   const ctx = emptyCtx({
     byAnilist: new Map([[30, { tvdbId: 3000, season: 1 }]]),
     dropped: new Set([3000]),
-    fb: new Map([[31, "liked"], [32, "meh"]]),
-    lists: new Map([[33, { status: "COMPLETED", score: 90, progress: 12 }], [34, { status: "DROPPED", score: null, progress: 1 }]]),
+    fb: new Map([
+      [31, "liked"],
+      [32, "meh"],
+    ]),
+    lists: new Map([
+      [33, { status: "COMPLETED", score: 90, progress: 12 }],
+      [34, { status: "DROPPED", score: null, progress: 1 }],
+    ]),
     listScored: true,
   });
   assert.deepEqual(labelOf(30, ctx), { n: 1.5, p: 0.2, fav: false, known: true });

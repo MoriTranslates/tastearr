@@ -4,6 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json vite.config.ts ./
 COPY server ./server
+COPY shared ./shared
 COPY web ./web
 RUN npm run build && npm prune --omit=dev
 

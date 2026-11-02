@@ -1,13 +1,15 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { db, transaction } from "../server/db.js";
-import { eachLimit, SEASON_CONCURRENCY, watchStates } from "../server/mediaserver.js";
-import { ntfyTarget, send } from "../server/notify.js";
-import { getSettings, patchSettings } from "../server/settings.js";
-import { flushPending, handleSonarrWebhook } from "../server/shows.js";
-import { monitorSeason, REFRESH_WAIT } from "../server/sonarr.js";
-import { context, invalidateContext } from "../server/taste.js";
+import { ntfyTarget } from "../server/adapters/notify.js";
+import { eachLimit, SEASON_CONCURRENCY } from "../server/core/concurrency.js";
+import { db, transaction } from "../server/data/db.js";
+import { context, invalidateContext } from "../server/services/context.js";
+import { watchStates } from "../server/services/mediaserver.js";
+import { send } from "../server/services/notify.js";
+import { getSettings, patchSettings } from "../server/services/settings.js";
+import { monitorSeason, REFRESH_WAIT } from "../server/services/sonarr.js";
+import { flushPending, handleSonarrWebhook } from "../server/services/webhooks.js";
 import { json, mockFetch, sleep } from "./helpers.ts";
 
 const quiet = <T>(fn: () => Promise<T>) => {
@@ -15,7 +17,8 @@ const quiet = <T>(fn: () => Promise<T>) => {
   console.warn = () => undefined;
   return fn().finally(() => (console.warn = warn));
 };
-const setNotify = (n: Partial<ReturnType<typeof getSettings>["notify"]>) => patchSettings((s) => ({ ...s, notify: { ...s.notify, discordWebhook: "", ntfyUrl: "", gotifyUrl: "", gotifyToken: "", ...n } }));
+const setNotify = (n: Partial<ReturnType<typeof getSettings>["notify"]>) =>
+  patchSettings((s) => ({ ...s, notify: { ...s.notify, discordWebhook: "", ntfyUrl: "", gotifyUrl: "", gotifyToken: "", ...n } }));
 
 test("ntfy: JSON goes to the server root, keeping a reverse-proxy path prefix", () => {
   assert.deepEqual(ntfyTarget("https://ntfy.sh/my-alerts"), { endpoint: "https://ntfy.sh/", topic: "my-alerts" });
@@ -49,10 +52,17 @@ test("send() refuses a metadata address saved by an older version, without calli
 
 test("batched episode alerts are sent on shutdown instead of being lost", async () => {
   setNotify({ ntfyUrl: "https://ntfy.sh/alerts" });
-  const series = { title: "Hero Saga", tvdbId: 777, type: "anime", images: [{ coverType: "poster", remoteUrl: "https://img.example/p.jpg" }] };
+  const series = {
+    title: "Hero Saga",
+    tvdbId: 777,
+    type: "anime",
+    images: [{ coverType: "poster", remoteUrl: "https://img.example/p.jpg" }],
+  };
   const m = mockFetch((u) => (u.hostname === "ntfy.sh" ? json({ id: "1" }) : undefined));
   try {
-    assert.deepEqual(await handleSonarrWebhook({ eventType: "Download", series, episodes: [{ seasonNumber: 1, episodeNumber: 1 }] }), ["queued"]);
+    assert.deepEqual(await handleSonarrWebhook({ eventType: "Download", series, episodes: [{ seasonNumber: 1, episodeNumber: 1 }] }), [
+      "queued",
+    ]);
     await handleSonarrWebhook({ eventType: "Download", series, episodes: [{ seasonNumber: 1, episodeNumber: 2 }] });
     assert.equal(m.calls.length, 0, "still batching");
     assert.equal(await flushPending(), 1);
@@ -70,7 +80,15 @@ test("monitoring a season TVDB hasn't listed yet gives up waiting after REFRESH_
   patchSettings((s) => ({ ...s, sonarr: { ...s.sonarr, url: "http://192.168.1.10:8989", apiKey: "k" } }));
   const saved = { ...REFRESH_WAIT };
   Object.assign(REFRESH_WAIT, { polls: 3, everyMs: 1 });
-  const series = { id: 5, tvdbId: 555, title: "Hero Saga", seriesType: "anime", status: "continuing", monitored: false, seasons: [{ seasonNumber: 1, monitored: true }] };
+  const series = {
+    id: 5,
+    tvdbId: 555,
+    title: "Hero Saga",
+    seriesType: "anime",
+    status: "continuing",
+    monitored: false,
+    seasons: [{ seasonNumber: 1, monitored: true }],
+  };
   const m = mockFetch((u, c) => {
     const p = u.pathname.replace("/api/v3", "");
     if (p === "/series" && c.method === "GET") return json([series]);
@@ -88,7 +106,10 @@ test("monitoring a season TVDB hasn't listed yet gives up waiting after REFRESH_
     const put = m.calls.find((c) => c.method === "PUT")!.body as { monitored: boolean; monitorNewItems: string };
     assert.equal(put.monitored, true);
     assert.equal(put.monitorNewItems, "all", "Sonarr picks the season up when TVDB lists it");
-    assert.equal(m.calls.some((c) => c.method === "POST" && (c.body as { name?: string }).name === "SeasonSearch"), false);
+    assert.equal(
+      m.calls.some((c) => c.method === "POST" && (c.body as { name?: string }).name === "SeasonSearch"),
+      false,
+    );
   } finally {
     Object.assign(REFRESH_WAIT, saved);
     m.restore();
@@ -107,7 +128,10 @@ test("eachLimit never runs more than the limit at once and visits everything", a
     running--;
   });
   assert.equal(peak, 4);
-  assert.deepEqual(seen.sort((a, b) => a - b), [...Array(25).keys()]);
+  assert.deepEqual(
+    seen.sort((a, b) => a - b),
+    [...Array(25).keys()],
+  );
   await eachLimit([], 4, async () => assert.fail("no items"));
 });
 
@@ -115,7 +139,13 @@ test("Plex watch state: per-season requests run a few at a time, not one after a
   patchSettings((s) => ({ ...s, media: { type: "plex", url: "http://192.168.1.10:32400", token: "t", userId: "", libraryIds: ["1"] } }));
   let running = 0;
   let peak = 0;
-  const shows = Array.from({ length: 20 }, (_, i) => ({ ratingKey: String(100 + i), title: `Show ${i}`, Guid: [{ id: `tvdb://${1000 + i}` }], leafCount: 24, viewedLeafCount: i % 5 === 0 ? 0 : 6 }));
+  const shows = Array.from({ length: 20 }, (_, i) => ({
+    ratingKey: String(100 + i),
+    title: `Show ${i}`,
+    Guid: [{ id: `tvdb://${1000 + i}` }],
+    leafCount: 24,
+    viewedLeafCount: i % 5 === 0 ? 0 : 6,
+  }));
   const m = mockFetch(async (u) => {
     if (u.hostname === "raw.githubusercontent.com") return json([]);
     if (u.pathname === "/library/sections/1/all") return json({ MediaContainer: { Metadata: shows } });
@@ -125,7 +155,14 @@ test("Plex watch state: per-season requests run a few at a time, not one after a
     peak = Math.max(peak, running);
     await sleep(5);
     running--;
-    return json({ MediaContainer: { Metadata: [{ index: 1, leafCount: 12, viewedLeafCount: 6 }, { index: 2, leafCount: 12, viewedLeafCount: 0 }] } });
+    return json({
+      MediaContainer: {
+        Metadata: [
+          { index: 1, leafCount: 12, viewedLeafCount: 6 },
+          { index: 2, leafCount: 12, viewedLeafCount: 0 },
+        ],
+      },
+    });
   });
   try {
     const w = await watchStates();

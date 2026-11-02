@@ -1,11 +1,17 @@
 import type { FastifyRequest } from "fastify";
-import type { Media } from "../server/anilist.js";
-import type { Ctx } from "../server/taste.js";
+import type { Media } from "../server/core/taste/media.js";
+import type { Ctx } from "../server/core/taste/types.js";
 
-export interface Call { url: string; method: string; body: unknown; headers: Record<string, string> }
+export interface Call {
+  url: string;
+  method: string;
+  body: unknown;
+  headers: Record<string, string>;
+}
 export type Route = (url: URL, call: Call) => Response | undefined | Promise<Response | undefined>;
 
-export const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+export const json = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Replaces global fetch with `route`; unrouted URLs fail. Returns the recorded calls. */
@@ -33,7 +39,9 @@ export function mockFetch(route: Route) {
 }
 
 /** The bits of a Fastify request the auth helpers read. */
-export function fakeReq(o: { ip?: string; peer?: string; headers?: Record<string, string>; method?: string; cookies?: Record<string, string> } = {}) {
+export function fakeReq(
+  o: { ip?: string; peer?: string; headers?: Record<string, string>; method?: string; cookies?: Record<string, string> } = {},
+) {
   const ip = o.ip ?? "192.168.1.20";
   return {
     ip,
