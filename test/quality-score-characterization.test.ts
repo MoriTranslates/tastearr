@@ -54,7 +54,10 @@ const add = (m: Media) => {
   pool.set(m.id, m);
   return m;
 };
-const rel = (relationType: string, id: number, type = "ANIME", format: string | null = "TV") => ({ relationType, node: { id, type, format } });
+const rel = (relationType: string, id: number, type = "ANIME", format: string | null = "TV") => ({
+  relationType,
+  node: { id, type, format },
+});
 const edges = (...e: ReturnType<typeof rel>[]) => ({ edges: e });
 const T = (name: string, english = name) => ({ romaji: name, english, native: null });
 const series = (id: number, tvdbId: number, title: string, seasons: { seasonNumber: number; monitored: boolean }[], over = {}) => ({
@@ -82,7 +85,9 @@ const sameTitle = add(media(113, { title: T("Same"), relations: edges(rel("PREQU
 add(media(112, { title: { romaji: "Same Romaji", english: "Same", native: null }, status: "FINISHED" }));
 const bad = add(media(121, { title: T("Bad Two"), relations: edges(rel("PREQUEL", 120)), genres: ["Sports"], tags: tags("Baseball") }));
 add(media(120, { title: T("Bad One"), status: "FINISHED", genres: ["Sports"], tags: tags("Baseball") }));
-const spin = add(media(131, { title: T("Side Story"), format: "ONA", relations: edges(rel("PARENT", 130)), genres: ["Fantasy"], tags: tags("Magic") }));
+const spin = add(
+  media(131, { title: T("Side Story"), format: "ONA", relations: edges(rel("PARENT", 130)), genres: ["Fantasy"], tags: tags("Magic") }),
+);
 add(media(130, { title: T("Main Story"), status: "FINISHED", tags: tags("Isekai", "Magic", "Swordplay") }));
 const recapMovie = add(
   media(141, {
@@ -255,6 +260,10 @@ test("the characterization fixture exercises the interesting branches", () => {
   const some = (f: (p: (typeof all)[number]) => unknown) => all.some(f);
   assert.ok(some((p) => p.section === "continuing") && some((p) => p.section === "movies") && some((p) => p.section === "shorts"));
   assert.ok(some((p) => p.excluded) && some((p) => p.continues) && some((p) => p.compilationOf) && some((p) => p.spinOffOf));
-  for (const s of ["watching", "planning", "seen", "dropped", "following"]) assert.ok(some((p) => p.myStatus === s), s);
+  for (const s of ["watching", "planning", "seen", "dropped", "following"])
+    assert.ok(
+      some((p) => p.myStatus === s),
+      s,
+    );
   assert.ok(some((p) => p.matchGuessed) && some((p) => p.addVia === "radarr") && some((p) => p.needsMatch));
 });
