@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, store, type Settings as S, type Status } from "../api";
 import { Link } from "../router";
-import { AlertsCard, ArrCard, AutoDetect, ExtraSonarrCard, ListsCard, MediaCard, useSettings } from "./connections";
+import { AlertsCard } from "./AlertsCard";
+import { ArrCard } from "./ArrCard";
+import { AutoDetect } from "./AutoDetect";
+import { ExtraSonarrCard } from "./ExtraSonarrCard";
+import { ListsCard } from "./ListsCard";
+import { MediaCard } from "./MediaCard";
+import { useSettings } from "./useSettings";
 import { ErrorBox, ListInput, NumberInput, SecretInput, useToast } from "../components/ui";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { relTime } from "../lib/format";
