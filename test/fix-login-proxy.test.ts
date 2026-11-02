@@ -68,7 +68,7 @@ test("a flood that fills the password-check queue doesn't refuse the owner's che
   Object.assign(LOGIN_LIMITS, { scryptSlots: 1, scryptQueue: 1 });
   const stored = await hashPassword("correct horse");
   const junk = [checkPasswordLimited("a", stored), checkPasswordLimited("b", stored), checkPasswordLimited("c", stored)];
-  const owner = checkPasswordLimited("correct horse", stored, true);
+  const owner = checkPasswordLimited("correct horse", stored, "owner");
   const [r1, r2, r3] = await Promise.allSettled(junk);
   assert.equal(r1.status, "fulfilled");
   assert.equal(r2.status, "fulfilled");
@@ -79,7 +79,7 @@ test("a flood that fills the password-check queue doesn't refuse the owner's che
 test("the owner's lane has its own queue limit, so a flood naming the real user still can't grow it without bound", async () => {
   Object.assign(LOGIN_LIMITS, { scryptQueue: 1 });
   const stored = await hashPassword("correct horse");
-  const r = await Promise.allSettled([1, 2, 3].map(() => checkPasswordLimited("wrong", stored, true)));
+  const r = await Promise.allSettled([1, 2, 3].map(() => checkPasswordLimited("wrong", stored, "owner")));
   assert.deepEqual(
     r.map((x) => x.status),
     ["fulfilled", "fulfilled", "rejected"],

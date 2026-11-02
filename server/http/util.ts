@@ -3,8 +3,8 @@ import { fail, parseId } from "../core/errors.js";
 import { checkOutbound } from "../core/outbound.js";
 import { isMasked } from "../core/settings.js";
 import { SEASONS, seasonOf } from "../core/taste/media.js";
-import { makeSession, SESSION_TTL_MS } from "../services/sessions.js";
-import { COOKIE } from "./auth.js";
+import { DEVICE_TTL_MS, makeDevice, makeSession, SESSION_TTL_MS } from "../services/sessions.js";
+import { COOKIE, DEVICE_COOKIE } from "./auth.js";
 
 /** Request parsing helpers shared by the route modules. */
 
@@ -41,11 +41,8 @@ export function withSecret(url: unknown, secret: unknown, storedUrl: string, sto
 }
 
 export function sessionCookie(req: FastifyRequest, reply: FastifyReply, username: string) {
-  reply.setCookie(COOKIE, makeSession(username), {
-    path: "/",
-    httpOnly: true,
-    sameSite: "strict",
-    secure: req.protocol === "https",
-    maxAge: SESSION_TTL_MS / 1000,
-  });
+  const opts = { path: "/", httpOnly: true, sameSite: "strict" as const, secure: req.protocol === "https" };
+  reply.setCookie(COOKIE, makeSession(username), { ...opts, maxAge: SESSION_TTL_MS / 1000 });
+  // Kept after logout on purpose: it only marks this browser as one that has logged in before (see validDevice).
+  reply.setCookie(DEVICE_COOKIE, makeDevice(), { ...opts, maxAge: DEVICE_TTL_MS / 1000 });
 }

@@ -36,6 +36,30 @@ export function revokeSession(token: string | undefined) {
   return true;
 }
 
+/**
+ * "Known device": set on every successful login, so the login throttle and password-check queue can tell the owner's
+ * browser apart from a flood that merely names the (guessable) user name. Signed with the settings secret, so it can't
+ * be made up, and it stops working when the password changes. It grants nothing by itself: the password is still
+ * required.
+ */
+export const DEVICE_TTL_MS = 365 * 86_400_000;
+
+export function makeDevice() {
+  const payload = `${crypto.randomBytes(12).toString("base64url")}.${Date.now() + DEVICE_TTL_MS}`;
+  return `${payload}.${hmac(`device:${payload}`)}`;
+}
+
+/** The device id of a valid, unexpired device token, else null. */
+export function validDevice(token: string | undefined): string | null {
+  if (!token) return null;
+  const i = token.lastIndexOf(".");
+  if (i < 0) return null;
+  const payload = token.slice(0, i);
+  if (!safeEqual(token.slice(i + 1), hmac(`device:${payload}`))) return null;
+  const [id, exp] = payload.split(".");
+  return id && Number(exp) > Date.now() ? id : null;
+}
+
 /** Signed, expiring link for one action on one show (used by phone alert buttons). */
 export function signAction(action: string, id: number, ttlMs = 14 * 86_400_000) {
   const exp = Date.now() + ttlMs;

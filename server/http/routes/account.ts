@@ -11,6 +11,7 @@ import {
   checkPasswordLimited,
   COOKIE,
   csrfOk,
+  deviceOf,
   hostAllowed,
   isLocalRequest,
   loginAllowed,
@@ -67,13 +68,15 @@ export function accountRoutes(app: FastifyInstance) {
       const username = String(req.body?.username ?? "");
       const password = String(req.body?.password ?? "");
       checkLoginSize(username, password);
-      if (!loginAllowed(req.ip, username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
+      // A browser that logged in before is throttled on its own and checks in its own lane: a flood naming the real
+      // user can't refuse it. Otherwise the account's own name gets the owner lane, and anything else the shared one.
+      const device = deviceOf(req);
+      if (!loginAllowed(req.ip, username, device)) throw fail("Too many attempts, wait a few seconds and try again", 429);
       const a = getSettings().auth;
       const okUser = safeEqual(username, a.username);
-      // The account's own name checks in its reserved slot, so a flood of other names can't refuse it.
-      const okPass = await checkPasswordLimited(password, a.passwordHash || "00:00", okUser);
+      const okPass = await checkPasswordLimited(password, a.passwordHash || "00:00", device ? "device" : okUser ? "owner" : "shared");
       if (!okUser || !okPass) throw fail("Wrong username or password", 401);
-      loginSucceeded(req.ip, a.username);
+      loginSucceeded(req.ip, a.username, device);
       sessionCookie(req, reply, a.username);
       return { ok: true };
     },
@@ -96,9 +99,10 @@ export function accountRoutes(app: FastifyInstance) {
       checkLoginSize(username, current);
       checkLoginSize(username, password);
       // Same throttle as login: a stolen session cookie shouldn't allow unlimited password guesses.
-      if (!loginAllowed(req.ip, a.username)) throw fail("Too many attempts, wait a few seconds and try again", 429);
-      if (!(await checkPasswordLimited(current, a.passwordHash, true))) throw fail("Current password is wrong", 403);
-      loginSucceeded(req.ip, a.username);
+      const device = deviceOf(req);
+      if (!loginAllowed(req.ip, a.username, device)) throw fail("Too many attempts, wait a few seconds and try again", 429);
+      if (!(await checkPasswordLimited(current, a.passwordHash, device ? "device" : "owner"))) throw fail("Current password is wrong", 403);
+      loginSucceeded(req.ip, a.username, device);
       if (password && password.length < 8) throw fail("New password must be at least 8 characters");
       if (password) await setAccount(username, password);
       else patchSettings((s) => ({ ...s, auth: { ...s.auth, username } }));

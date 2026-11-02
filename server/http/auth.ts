@@ -5,7 +5,7 @@ import { fail } from "../core/errors.js";
 import { inCidr, isHomeNetwork as inHomeNetwork, isLoopback, isPrivateIp } from "../core/network.js";
 import { checkPassword, safeEqual } from "../core/secrets.js";
 import { noteProxy } from "../services/health.js";
-import { validSession } from "../services/sessions.js";
+import { validDevice, validSession } from "../services/sessions.js";
 import { getSettings } from "../services/settings.js";
 
 /**
@@ -14,6 +14,8 @@ import { getSettings } from "../services/settings.js";
  */
 
 export const COOKIE = "tastearr_session";
+/** Marks a browser that has logged in before (services/sessions.ts makeDevice). */
+export const DEVICE_COOKIE = "tastearr_device";
 
 declare module "fastify" {
   interface FastifyContextConfig {
@@ -224,9 +226,32 @@ function prune(now: number) {
   }
 }
 
-export function loginAllowed(ip: string, user: string) {
+// A browser that logged in before (a valid device cookie) is throttled on its own entry, kept apart from the per-address
+// table: neither a flood naming the real user nor a full table can slow it down. Device ids are only ever issued by a
+// successful login, so this table can't be flooded; it is still capped.
+const deviceAttempts = new Map<string, Attempt>();
+const MAX_DEVICES = 1_000;
+
+/**
+ * Whether this login attempt may go ahead now. `device` is the id from a valid device cookie (see deviceOf), if any.
+ */
+export function loginAllowed(ip: string, user: string, device: string | null = null) {
   const now = Date.now();
   prune(now);
+  if (device) {
+    const d = deviceAttempts.get(device) ?? { n: 0, until: 0, seen: now, ip };
+    if (d.until > now) return false;
+    d.n++;
+    d.seen = now;
+    if (d.n > LOGIN_LIMITS.perUser) d.until = now + Math.min(15_000, 1000 * 2 ** (d.n - LOGIN_LIMITS.perUser));
+    deviceAttempts.delete(device);
+    deviceAttempts.set(device, d);
+    for (const k of deviceAttempts.keys()) {
+      if (deviceAttempts.size <= MAX_DEVICES) break;
+      deviceAttempts.delete(k);
+    }
+    return true;
+  }
   const own = user.toLowerCase() === getSettings().auth.username.toLowerCase();
   let key = userKey(ip, user);
   if (!own && !attempts.has(key) && (namesOf.get(ip) ?? 0) >= LOGIN_LIMITS.namesPerIp) key = sharedKey(ip);
@@ -245,25 +270,38 @@ export function loginAllowed(ip: string, user: string) {
   attempts.set(key, a);
   return true;
 }
-export function loginSucceeded(ip: string, user: string) {
+export function loginSucceeded(ip: string, user: string, device: string | null = null) {
   drop(userKey(ip, user));
+  if (device) deviceAttempts.delete(device);
 }
+
+/** The device id from the request's device cookie, when it is valid. */
+export const deviceOf = (req: FastifyRequest) => validDevice(req.cookies[DEVICE_COOKIE]);
 
 /** Login throttle entries (tests: the table stays bounded). */
 export const trackedLoginAttempts = () => attempts.size;
 
-// scrypt is deliberately slow; unbounded parallel checks would let a burst of requests tie up every CPU. A login for
-// the account's own user name uses a separate reserved slot, so a flood of junk names filling the queue can't refuse
-// it. That lane has its own queue limit: only a flood that names the real user (from many addresses) can fill it.
-const lanes = { shared: { active: 0, waiting: [] as (() => void)[] }, owner: { active: 0, waiting: [] as (() => void)[] } };
+// scrypt is deliberately slow; unbounded parallel checks would let a burst of requests tie up every CPU. Three lanes,
+// each with its own slots and queue limit:
+// - "shared": every other request.
+// - "owner": requests naming the account's own user name, so a flood of junk names can't refuse them. The name is
+//   guessable, so a flood naming it can fill this lane (AnimeArr review B4).
+// - "device": a browser that logged in before (a valid device cookie) or an already signed-in session; a flood without
+//   that cookie can't reach this lane.
+type Lane = "shared" | "owner" | "device";
+const lanes: Record<Lane, { active: number; waiting: (() => void)[] }> = {
+  shared: { active: 0, waiting: [] },
+  owner: { active: 0, waiting: [] },
+  device: { active: 0, waiting: [] },
+};
 
 /**
- * checkPassword with at most `scryptSlots` running at once and `scryptQueue` waiting (more are refused with 429).
- * `owner` (the request names the account's own user name) runs in its own one-slot lane, with its own queue.
+ * checkPassword with at most `scryptSlots` running at once in the shared lane (one in the others) and `scryptQueue`
+ * waiting per lane; more are refused with 429.
  */
-export async function checkPasswordLimited(pw: string, stored: string, owner = false) {
-  const lane = owner ? lanes.owner : lanes.shared;
-  const slots = owner ? 1 : LOGIN_LIMITS.scryptSlots;
+export async function checkPasswordLimited(pw: string, stored: string, laneName: Lane = "shared") {
+  const lane = lanes[laneName];
+  const slots = laneName === "shared" ? LOGIN_LIMITS.scryptSlots : 1;
   if (lane.active < slots) lane.active++;
   else {
     if (lane.waiting.length >= LOGIN_LIMITS.scryptQueue)
