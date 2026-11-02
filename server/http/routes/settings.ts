@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PublicSettings } from "../../../shared/api.js";
+import { userFacing } from "../../core/errors.js";
 import { checkOutbound } from "../../core/outbound.js";
 import { isMasked, type Settings } from "../../core/settings.js";
 import { invalidateContext } from "../../services/context.js";
@@ -65,6 +66,7 @@ export function settingsRoutes(app: FastifyInstance) {
   });
   app.delete<{ Params: { i: string } }>("/api/sonarr/extra/:i", async (req) => {
     const i = Number(req.params.i);
+    if (!Number.isInteger(i) || i < 0 || i >= getSettings().sonarrExtra.length) throw fail("That Sonarr isn't connected", 404);
     patchSettings((x) => ({ ...x, sonarrExtra: x.sonarrExtra.filter((_, k) => k !== i) }));
     forgetSeries();
     invalidateContext();
@@ -73,7 +75,8 @@ export function settingsRoutes(app: FastifyInstance) {
 
   app.get("/api/discover", async () => discover());
   app.post<{ Body: { id: string; url: string } }>("/api/discover/use", async (req) => {
-    const r = await useDiscovered(String(req.body?.id ?? ""), String(req.body?.url ?? ""), authState(req).via === "session");
+    // Every error useDiscovered throws is about what was asked for (stale id, bad or off-network address): a 400, not a 500.
+    const r = await userFacing(() => useDiscovered(String(req.body?.id ?? ""), String(req.body?.url ?? ""), authState(req).via === "session"));
     invalidateContext();
     return r;
   });
