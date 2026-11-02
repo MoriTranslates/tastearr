@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { usePageTitle } from "../ui";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export function Login({ onDone }: { onDone: () => void }) {
   usePageTitle("Log in");

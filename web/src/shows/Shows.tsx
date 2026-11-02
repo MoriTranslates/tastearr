@@ -1,24 +1,18 @@
-import { useEffect, useState } from "react";
-import { Link } from "../App";
-import { clearPicksCache } from "./Picks";
+import { useState } from "react";
+import { Link } from "../router";
+import { clearPicksCache } from "../picks/picksCache";
 import { api, type Followed, type Show, type Status } from "../api";
-import { airLabel, ErrorBox, Spinner, usePageTitle, useToast } from "../ui";
+import { ErrorBox, Spinner, useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { useShows } from "./useShows";
+import { airLabel } from "../lib/format";
 
 export function Shows({ status }: { status: Status }) {
   usePageTitle("My Shows");
   const toast = useToast();
-  const [data, setData] = useState<{ sonarr: Show[]; following: Followed[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data, setData, error, retry } = useShows();
   const [busy, setBusy] = useState<number | null>(null);
   const [q, setQ] = useState("");
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    setError(null);
-    api<{ sonarr: Show[]; following: Followed[] }>("/shows")
-      .then(setData)
-      .catch((e) => setError(e.message));
-  }, [reload]);
 
   async function toggle(s: Show) {
     const sonarrPart =
@@ -64,7 +58,7 @@ export function Shows({ status }: { status: Status }) {
     }
   }
 
-  if (error) return <ErrorBox error={error} retry={() => setReload((x) => x + 1)} />;
+  if (error) return <ErrorBox error={error} retry={retry} />;
   if (!data) return <Spinner label="Loading your shows…" />;
   const match = (t: string) => !q || t.toLowerCase().includes(q.toLowerCase());
   const sonarr = data.sonarr.filter((s) => match(s.title));

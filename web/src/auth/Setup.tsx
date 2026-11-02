@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, ApiError } from "../api";
-import { usePageTitle } from "../ui";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 /** First run: create the account (like Sonarr/Radarr's "Authentication Required" screen, in plain words). */
 export function Setup({ onDone }: { onDone: () => void }) {

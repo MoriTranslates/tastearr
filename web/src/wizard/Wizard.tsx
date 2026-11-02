@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Job, type Status } from "../api";
-import { Link, navigate } from "../App";
-import { AlertsCard, ArrCard, AutoDetect, ListsCard, MediaCard, unsaved, useSettings } from "../connections";
-import { usePageTitle } from "../ui";
+import { Link, navigate } from "../router";
+import { AlertsCard } from "../settings/AlertsCard";
+import { ArrCard } from "../settings/ArrCard";
+import { AutoDetect } from "../settings/AutoDetect";
+import { ListsCard } from "../settings/ListsCard";
+import { MediaCard } from "../settings/MediaCard";
+import { unsaved } from "../settings/unsaved";
+import { useSettings } from "../settings/useSettings";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 type Mode = "server" | "stream";
 const STEPS: Record<Mode, string[]> = {

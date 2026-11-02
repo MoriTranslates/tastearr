@@ -1,36 +1,18 @@
-import { useEffect, useState } from "react";
-import { api, type Job } from "../api";
-import { relTime, usePageTitle, useToast } from "../ui";
+import { useState } from "react";
+import { api } from "../api";
+import { useToast } from "../components/ui";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { relTime } from "../lib/format";
+import { useHealth, useSystemInfo } from "./useSystem";
 
 const JOB_NAMES: Record<string, string> = { profile: "Build taste profile", refresh: "Refresh seasons & alerts" };
 
 export function System() {
   usePageTitle("System");
   const toast = useToast();
-  const [info, setInfo] = useState<{ version: string; uptime: number; node: string; jobs: Job[] } | null>(null);
+  const info = useSystemInfo();
 
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      api<{ version: string; uptime: number; node: string; jobs: Job[] }>("/system")
-        .then((x) => alive && setInfo(x))
-        .catch((e) => toast(e.message, true));
-    load();
-    const t = setInterval(load, 3000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [toast]);
-
-  const [health, setHealth] = useState<{ checks: { name: string; ok: boolean; detail: string }[] } | null>(null);
-  const checkHealth = () => {
-    setHealth(null);
-    api<NonNullable<typeof health>>("/system/health")
-      .then(setHealth)
-      .catch((e) => toast(e.message, true));
-  };
-  useEffect(checkHealth, [toast]);
+  const { health, checkHealth } = useHealth();
 
   // The backup holds every key, so it asks for the password again (and needs a password login, not the home-network shortcut).
   const [pw, setPw] = useState("");
