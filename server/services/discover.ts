@@ -1,4 +1,5 @@
 import { scan } from "../adapters/discovery.js";
+import { fail } from "../core/errors.js";
 import { isPrivateHost } from "../core/network.js";
 import { checkOutbound } from "../core/outbound.js";
 import { patchSettings } from "./settings.js";
@@ -20,21 +21,21 @@ export async function discover() {
  */
 export async function useDiscovered(id: string, url: string, loggedIn: boolean) {
   const f = (await scan()).found.find((x) => x.id === id);
-  if (!f) throw new Error("That app is no longer detected");
-  if (f.app !== "sonarr" && f.app !== "radarr") throw new Error("Only Sonarr and Radarr can be connected this way");
+  if (!f) throw fail("That app is no longer detected", 404);
+  if (f.app !== "sonarr" && f.app !== "radarr") throw fail("Only Sonarr and Radarr can be connected this way", 400);
   const clean = url.trim().replace(/\/+$/, "");
   let u: URL;
   try {
     u = new URL(clean);
   } catch {
-    throw new Error("That isn't a valid address");
+    throw fail("That isn't a valid address", 400);
   }
   checkOutbound(clean);
   const detected = f.url?.replace(/\/+$/, "") === clean;
   if (!detected) {
-    if (!loggedIn) throw new Error("Log in with your password to use a different address, or paste the API key yourself");
+    if (!loggedIn) throw fail("Log in with your password to use a different address, or paste the API key yourself", 403);
     if (!isPrivateHost(u.hostname))
-      throw new Error("The detected key is only sent to an address on your home network. For anything else, paste the API key yourself.");
+      throw fail("The detected key is only sent to an address on your home network. For anything else, paste the API key yourself.", 400);
   }
   patchSettings((s) => ({ ...s, [f.app]: { ...s[f.app as "sonarr" | "radarr"], url: clean, apiKey: f.apiKey } }));
   return { ok: true, app: f.app };

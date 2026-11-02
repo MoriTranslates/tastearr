@@ -1,4 +1,5 @@
 import { checkOutbound } from "../core/outbound.js";
+import { safeFetch } from "./net.js";
 
 /** Push notification channels: Discord webhooks, ntfy and Gotify. Each send takes its own address and token. */
 
@@ -17,15 +18,18 @@ async function check(res: Response, who: string) {
 }
 
 export async function sendDiscord(webhook: string, m: Message) {
-  checkOutbound(webhook, "The Discord webhook");
   const embed = { title: m.title, description: m.body, url: m.url, color: 0x8b5cf6, thumbnail: m.image ? { url: m.image } : undefined };
   await check(
-    await fetch(webhook, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "Tastearr", embeds: [embed] }),
-      signal: AbortSignal.timeout(20_000),
-    }),
+    await safeFetch(
+      webhook,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "Tastearr", embeds: [embed] }),
+        signal: AbortSignal.timeout(20_000),
+      },
+      "The Discord webhook",
+    ),
     "Discord",
   );
 }
@@ -54,11 +58,17 @@ export async function sendNtfy(topicUrl: string, token: string, m: Message) {
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  await check(await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }), "ntfy");
+  await check(
+    await safeFetch(
+      endpoint,
+      { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) },
+      "The ntfy address",
+    ),
+    "ntfy",
+  );
 }
 
 export async function sendGotify(url: string, token: string, m: Message) {
-  checkOutbound(url, "The Gotify address");
   const body = {
     title: m.title,
     message: m.body,
@@ -66,12 +76,16 @@ export async function sendGotify(url: string, token: string, m: Message) {
     extras: { "client::notification": { click: m.url ? { url: m.url } : undefined, bigImageUrl: m.image ?? undefined } },
   };
   await check(
-    await fetch(`${url.replace(/\/+$/, "")}/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Gotify-Key": token },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
-    }),
+    await safeFetch(
+      `${url.replace(/\/+$/, "")}/message`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Gotify-Key": token },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+      },
+      "The Gotify address",
+    ),
     "Gotify",
   );
 }

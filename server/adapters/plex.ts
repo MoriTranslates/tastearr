@@ -1,6 +1,7 @@
 import { eachLimit, SEASON_CONCURRENCY } from "../core/concurrency.js";
-import { checkOutbound } from "../core/outbound.js";
 import type { WatchState } from "../core/taste/types.js";
+import { safeFetch } from "./net.js";
+import { keepMostWatched, tvdbFromIds, type ShowIds, type ShowIdTables } from "./showids.js";
 
 /** A Plex Media Server (libraries, watch progress) and plex.tv ("Sign in with Plex", the account's servers). */
 
@@ -10,11 +11,11 @@ export interface PlexConn {
 }
 
 async function plexGet<T>(conn: PlexConn, path: string): Promise<T> {
-  checkOutbound(conn.url, "The media server address");
-  const res = await fetch(`${conn.url}${path}`, {
-    headers: { Accept: "application/json", "X-Plex-Token": conn.token },
-    signal: AbortSignal.timeout(60_000),
-  });
+  const res = await safeFetch(
+    `${conn.url}${path}`,
+    { headers: { Accept: "application/json", "X-Plex-Token": conn.token }, signal: AbortSignal.timeout(60_000) },
+    "The media server address",
+  );
   if (!res.ok) throw new Error(`Plex ${path.split("?")[0]} failed (HTTP ${res.status})`);
   return ((await res.json()) as { MediaContainer: T }).MediaContainer;
 }
@@ -30,18 +31,26 @@ export async function plexLibraries(conn: PlexConn) {
   return (d.Directory ?? []).filter((x) => x.type === "show").map((x) => ({ id: x.key, title: x.title }));
 }
 
-/** TVDB id from the new Plex agent's Guid list, the legacy TheTVDB agent, or HAMA (tvdb-N or anidb-N). */
-function plexTvdb(s: { guid?: string; Guid?: { id: string }[] }, tvdbByAnidb: Map<number, number>) {
-  const fromList = s.Guid?.find((g) => g.id.startsWith("tvdb://"))?.id.slice(7);
-  if (fromList) return Number(fromList);
-  const legacy = s.guid?.match(/(?:thetvdb:\/\/|tvdb\d?-)(\d+)/);
-  if (legacy) return Number(legacy[1]);
-  const anidb = s.guid?.match(/anidb\d?-(\d+)/);
-  return anidb ? (tvdbByAnidb.get(Number(anidb[1])) ?? 0) : 0;
+/**
+ * A show's ids: the new Plex agent lists them in `Guid` (tvdb://, tmdb://, imdb://); legacy agents put one in `guid`
+ * (thetvdb://, themoviedb://, imdb://), and HAMA uses tvdb-N or anidb-N. TVDB wins; the rest go through the mapping.
+ */
+export function plexShowIds(s: { guid?: string; Guid?: { id: string }[] }): ShowIds {
+  const ids: ShowIds = {};
+  for (const g of s.Guid ?? []) {
+    const m = g.id.match(/^(tvdb|tmdb|imdb):\/\/(.+)$/);
+    if (m) ids[m[1] as "tvdb" | "tmdb" | "imdb"] ??= m[2];
+  }
+  const legacy = s.guid ?? "";
+  ids.tvdb ??= legacy.match(/(?:thetvdb:\/\/|tvdb\d?-)(\d+)/)?.[1];
+  ids.tmdb ??= legacy.match(/themoviedb:\/\/(\d+)/)?.[1];
+  ids.imdb ??= legacy.match(/imdb:\/\/(tt\d+)/)?.[1];
+  ids.anidb = legacy.match(/anidb\d?-(\d+)/)?.[1];
+  return ids;
 }
 
 /** Watch progress per TVDB id in the given libraries; per-season detail only for shows with some progress. */
-export async function plexWatchStates(conn: PlexConn, libs: string[], tvdbByAnidb: Map<number, number>) {
+export async function plexWatchStates(conn: PlexConn, libs: string[], idTables: ShowIdTables) {
   const out = new Map<number, WatchState>();
   type PlexShow = {
     ratingKey: string;
@@ -56,7 +65,7 @@ export async function plexWatchStates(conn: PlexConn, libs: string[], tvdbByAnid
   for (const lib of libs) {
     const d = await plexGet<{ Metadata?: PlexShow[] }>(conn, `/library/sections/${encodeURIComponent(lib)}/all?type=2&includeGuids=1`);
     for (const s of d.Metadata ?? []) {
-      const tvdb = plexTvdb(s, tvdbByAnidb);
+      const tvdb = tvdbFromIds(plexShowIds(s), idTables);
       if (!tvdb) continue;
       const state: WatchState = {
         title: s.title,
@@ -66,8 +75,7 @@ export async function plexWatchStates(conn: PlexConn, libs: string[], tvdbByAnid
         rating: s.userRating ?? null,
       };
       // Per-season detail only for shows with some progress (one request each, a few at a time).
-      if (state.watched > 0) detail.push({ key: s.ratingKey, state });
-      out.set(tvdb, state);
+      if (keepMostWatched(out, tvdb, state) && state.watched > 0) detail.push({ key: s.ratingKey, state });
     }
   }
   await eachLimit(detail, SEASON_CONCURRENCY, async ({ key, state }) => {

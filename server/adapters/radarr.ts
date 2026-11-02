@@ -15,3 +15,6 @@ export const allMovies = (conn: ArrConn) => call<RadarrMovie[]>(conn, "GET", "/m
 export const lookupTmdb = (conn: ArrConn, tmdbId: number) => call<RadarrMovie>(conn, "GET", `/movie/lookup/tmdb?tmdbId=${tmdbId}`);
 export const lookupImdb = (conn: ArrConn, imdbId: string) => call<RadarrMovie>(conn, "GET", `/movie/lookup/imdb?imdbId=${imdbId}`);
 export const addMovie = (conn: ArrConn, movie: unknown) => call<RadarrMovie>(conn, "POST", "/movie", movie);
+/** The library's copy of a movie, if it has one (filtered here too, in case the server ignores the query). */
+export const movieByTmdb = async (conn: ArrConn, tmdbId: number) =>
+  (await call<RadarrMovie[]>(conn, "GET", `/movie?tmdbId=${tmdbId}`)).find((x) => x.tmdbId === tmdbId) ?? null;

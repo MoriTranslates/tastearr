@@ -2,6 +2,7 @@ import type { ArrConn } from "../adapters/arr.js";
 import * as sonarr from "../adapters/sonarr.js";
 import type { SonarrSeries } from "../adapters/sonarr.js";
 import { defaultMonitor, MONITOR_LABEL, monitorOptions, planSeriesAdd, rateTitleMatch, type MonitorChoice } from "../core/add-plan.js";
+import { fail } from "../core/errors.js";
 import { removeDropped } from "../data/library.js";
 import { getSettings } from "./settings.js";
 
@@ -19,7 +20,7 @@ function connOf(instance = ""): ArrConn {
   const s = getSettings();
   if (!instance || instance === s.sonarr.url) return s.sonarr;
   const x = s.sonarrExtra.find((e) => e.url === instance);
-  if (!x) throw new Error("That Sonarr instance was removed; reload the page");
+  if (!x) throw fail("That Sonarr instance was removed; reload the page", 409);
   return x;
 }
 
@@ -54,7 +55,7 @@ async function ensureTag(conn: ArrConn): Promise<number | null> {
 
 async function lookupTvdb(conn: ArrConn, tvdbId: number) {
   const [s] = await sonarr.lookup(conn, `tvdb:${tvdbId}`);
-  if (!s) throw new Error(`Sonarr found no series for TVDB ${tvdbId}`);
+  if (!s) throw fail(`Sonarr found no series for TVDB ${tvdbId}`, 404);
   return s;
 }
 
@@ -104,24 +105,43 @@ export async function addSeries(
   opts: { monitor?: MonitorChoice; search?: boolean; firstOfMany?: boolean } = {},
 ) {
   const cfg = getSettings().sonarr;
-  if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw new Error("Pick a quality profile and root folder in Settings first");
+  if (!cfg.qualityProfileId || !cfg.rootFolderPath) throw fail("Pick a quality profile and root folder in Settings first", 400);
   const s = await lookupTvdb(cfg, tvdbId);
+  // Idempotent: a retry after a timeout, or an auto-add run after a crash, finds the series already there (Sonarr's
+  // lookup gives library series their id) and reports it instead of failing on "already added".
+  if (s.id) return { id: s.id, title: s.title, monitored: "Already in Sonarr", waitingForSeason: false, alreadyAdded: true };
   const choice = opts.monitor ?? defaultMonitor(season, cfg.sequelMonitor, opts.firstOfMany);
   const { monitor, listed, addOptions } = planSeriesAdd(s, season, choice, opts.search ?? cfg.searchOnAdd);
   const tag = await ensureTag(cfg);
-  const added = await sonarr.addSeries(cfg, {
-    ...s,
-    qualityProfileId: cfg.qualityProfileId,
-    rootFolderPath: cfg.rootFolderPath,
-    seriesType: "anime",
-    seasonFolder: true,
-    monitored: monitor !== "none",
-    monitorNewItems: monitor === "none" ? "none" : "all",
-    tags: [...new Set([...cfg.tags, ...(tag ? [tag] : [])])],
-    addOptions,
-  });
-  seriesCache = null;
-  return { id: added.id, title: added.title, monitored: MONITOR_LABEL[monitor](season), waitingForSeason: monitor === "season" && !listed };
+  let added: SonarrSeries;
+  try {
+    added = await sonarr.addSeries(cfg, {
+      ...s,
+      qualityProfileId: cfg.qualityProfileId,
+      rootFolderPath: cfg.rootFolderPath,
+      seriesType: "anime",
+      seasonFolder: true,
+      monitored: monitor !== "none",
+      monitorNewItems: monitor === "none" ? "none" : "all",
+      tags: [...new Set([...cfg.tags, ...(tag ? [tag] : [])])],
+      addOptions,
+    });
+  } catch (e) {
+    // The request may have reached Sonarr even though the answer didn't come back (timeout), or another add won the
+    // race. If the series is there now, the add happened.
+    const there = await sonarr.seriesByTvdb(cfg, tvdbId).catch(() => null);
+    if (!there) throw e;
+    added = there;
+  } finally {
+    seriesCache = null;
+  }
+  return {
+    id: added.id,
+    title: added.title,
+    monitored: MONITOR_LABEL[monitor](season),
+    waitingForSeason: monitor === "season" && !listed,
+    alreadyAdded: false,
+  };
 }
 
 export async function setMonitored(seriesId: number, monitored: boolean, instance = "") {
@@ -145,7 +165,7 @@ export const REFRESH_WAIT = { polls: 10, everyMs: 2000 };
 /** Monitors one season of a series that's already in Sonarr (refreshing it first if TVDB is newer) and searches for it. */
 export async function monitorSeason(tvdbId: number, season: number, search = getSettings().sonarr.searchOnAdd) {
   const s = (await sonarrSeries(true)).find((x) => x.tvdbId === tvdbId);
-  if (!s) throw new Error("Series is not in Sonarr");
+  if (!s) throw fail("Series is not in Sonarr", 404);
   const c = connOf(s.instance);
   let full = await sonarr.getSeries(c, s.id);
   if (!full.seasons.some((x) => x.seasonNumber === season)) {
