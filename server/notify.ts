@@ -1,4 +1,5 @@
 import { db } from "./db.js";
+import { checkOutbound } from "./outbound.js";
 import type { Season } from "./anilist.js";
 import { getSettings } from "./settings.js";
 import { recommend } from "./taste.js";
@@ -18,14 +19,26 @@ async function check(res: Response, who: string) {
 }
 
 async function sendDiscord(webhook: string, m: Message) {
+  checkOutbound(webhook, "The Discord webhook");
   const embed = { title: m.title, description: m.body, url: m.url, color: 0x8b5cf6, thumbnail: m.image ? { url: m.image } : undefined };
   await check(await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Tastearr", embeds: [embed] }), signal: AbortSignal.timeout(20_000) }), "Discord");
 }
 
+/**
+ * ntfy's JSON publishing goes to the server's root with the topic in the body. The root is everything before the topic,
+ * so a server behind a path prefix (https://example.com/ntfy/my-topic) keeps its prefix.
+ */
+export function ntfyTarget(topicUrl: string) {
+  const u = new URL(checkOutbound(topicUrl, "The ntfy address"));
+  const parts = u.pathname.replace(/\/+$/, "").split("/");
+  const topic = parts.pop() ?? "";
+  return { endpoint: `${u.origin}${parts.join("/")}/`, topic };
+}
+
 async function sendNtfy(topicUrl: string, token: string, m: Message) {
-  const u = new URL(topicUrl);
+  const { endpoint, topic } = ntfyTarget(topicUrl);
   const body = {
-    topic: u.pathname.replace(/^\/+/, ""),
+    topic,
     title: m.title,
     message: m.body,
     click: m.url,
@@ -35,10 +48,11 @@ async function sendNtfy(topicUrl: string, token: string, m: Message) {
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  await check(await fetch(u.origin, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }), "ntfy");
+  await check(await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }), "ntfy");
 }
 
 async function sendGotify(url: string, token: string, m: Message) {
+  checkOutbound(url, "The Gotify address");
   const body = {
     title: m.title,
     message: m.body,

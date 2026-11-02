@@ -83,6 +83,7 @@ services:
 | `TASTEARR_APPDATA` | `/appdata` | Where "Find my apps" looks for Sonarr's `config.xml` |
 | `TRUST_PROXY` | | Your reverse proxy's IP/CIDR (e.g. `172.18.0.0/16`) or a hop count. `true` is refused because it would let anyone fake their IP. |
 | `TASTEARR_ALLOWED_HOSTS` | | Extra hostnames allowed for the local-network login bypass (see Security) |
+| `TASTEARR_LOCAL_NETWORKS` | | Your home network as comma-separated IPv4 CIDRs, if it isn't in `10.0.0.0/8` or `192.168.0.0/16` (e.g. `172.20.0.0/16`). Replaces the defaults. |
 | `UMASK` | | Permission mask for files in `/config`, e.g. `002` |
 
 `GET /ping` answers `{"status":"OK"}` without a login, for Docker health checks and Uptime Kuma.
@@ -104,9 +105,11 @@ For **phone alerts**:
 
 ## Security
 
-- **An account is always required.** "Authentication required: **Disabled for local addresses**" works like it does in Sonarr. It only applies to direct connections from private IPs: anything arriving through a reverse proxy or tunnel needs a login unless `TRUST_PROXY` names that proxy. It's also ignored when the page is opened under an unknown hostname, which protects against DNS rebinding.
+- **An account is always required.** "Authentication required: **Disabled for local addresses**" works like it does in Sonarr. It only applies to direct connections from your home network (`10.x`, `192.168.x`, IPv6 local addresses, or `TASTEARR_LOCAL_NETWORKS`). Docker's own `172.16-31.x` networks and `127.0.0.1` never count, because Docker's port forwarding (for example for IPv6 visitors, or Docker Desktop) and tunnels on the same host make internet traffic arrive from those addresses. Anything arriving through a reverse proxy or tunnel needs a login, and so does everything when `TRUST_PROXY` is a hop count. It's also ignored when the page is opened under an unknown hostname, which protects against DNS rebinding.
 - **Reverse proxies must send `X-Forwarded-For`** (Nginx Proxy Manager, SWAG, Traefik and Caddy do by default; plain nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Like Sonarr, a proxy that hides the client completely looks like a local visitor.
-- **A new install can only be claimed from your home network**, or with the one-time setup code printed in the container log.
+- **A new install can only be claimed from your home network** (same rule as above), or with the one-time setup code printed in the container log.
+- **Outgoing addresses are checked.** Sonarr, Radarr, Plex/Jellyfin and alert addresses must be `http(s)` and can't point at link-local or cloud-metadata addresses (`169.254.x`, `fe80::`, `metadata.google.internal` and their IPv6-mapped forms). LAN addresses are fine.
+- **Logging out ends that session on the server**, and changing the password signs out every device.
 - **Secrets never go back to the browser.** That covers saved keys and tokens, and keys found by "Find my apps". A saved key is only re-used for the address it was saved with.
 - **State-changing requests need a custom header** (CSRF protection). Request logs never include query strings or webhook keys.
 - **Separate keys.** The admin API key (`X-Api-Key` header) is separate from the webhook key. Alert buttons use signed, expiring links.
@@ -133,7 +136,10 @@ npm install
 TASTEARR_CONFIG=.devconfig npm run dev:server   # API on :8383
 npm run dev:web                                 # Vite on :5173, proxies /api
 npm run build && npm start
+npm test                                         # unit + route tests (no network)
 ```
+
+Always run tests with `npm test`: it keeps every scratch folder in one temp directory and deletes it afterwards. Don't run `node --test` directly.
 
 Requires Node 22.13+ (uses the built-in `node:sqlite`).
 

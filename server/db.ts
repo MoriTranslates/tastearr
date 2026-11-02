@@ -46,6 +46,8 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS mapping_overrides (anilist_id INTEGER PRIMARY KEY, tvdb_id INTEGER NOT NULL, season INTEGER, at INTEGER NOT NULL);`,
   // 5: shows auto-add sent to Sonarr/Radarr (each at most once, so a removed show never comes back)
   `CREATE TABLE IF NOT EXISTS auto_added (anilist_id INTEGER PRIMARY KEY, title TEXT NOT NULL, season TEXT NOT NULL, year INTEGER NOT NULL, match INTEGER NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);`,
+  // 6: logged-out session cookies (SHA-256 of the cookie), kept until they would have expired anyway
+  `CREATE TABLE IF NOT EXISTS revoked_sessions (hash TEXT PRIMARY KEY, exp INTEGER NOT NULL);`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -58,6 +60,27 @@ for (let v = current; v < MIGRATIONS.length; v++) {
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
+  }
+}
+
+/**
+ * Runs `fn` in one transaction. Many single-row writes otherwise each commit (and sync to disk) on their own, which
+ * blocks the server for seconds on a slow appdata disk when a season of several hundred shows is stored.
+ */
+let txDepth = 0;
+export function transaction<T>(fn: () => T): T {
+  if (txDepth) return fn(); // already inside one: the outer transaction commits
+  db.exec("BEGIN");
+  txDepth++;
+  try {
+    const out = fn();
+    db.exec("COMMIT");
+    return out;
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  } finally {
+    txDepth--;
   }
 }
 

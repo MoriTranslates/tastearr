@@ -1,4 +1,5 @@
 import { mappingTables } from "./mapping.js";
+import { checkOutbound } from "./outbound.js";
 import { getSettings, type Settings } from "./settings.js";
 
 /** How far the user got through a show, keyed by TVDB id, with per-season detail when available. */
@@ -14,7 +15,7 @@ export interface WatchState {
 type MediaConn = Settings["media"];
 
 function checkUrl(url: string) {
-  if (!/^https?:\/\//i.test(url)) throw new Error("Server URL must start with http:// or https://");
+  checkOutbound(url, "The media server address");
 }
 
 async function plexGet<T>(conn: MediaConn, path: string): Promise<T> {
@@ -77,6 +78,18 @@ function plexTvdb(s: { guid?: string; Guid?: { id: string }[] }, tvdbByAnidb: Ma
   return anidb ? (tvdbByAnidb.get(Number(anidb[1])) ?? 0) : 0;
 }
 
+/** Per-season requests in flight at once: a library with hundreds of started shows took a minute one at a time. */
+export const SEASON_CONCURRENCY = 6;
+
+/** Runs `fn` over `items` with at most `limit` running at once. */
+export async function eachLimit<T>(items: T[], limit: number, fn: (x: T) => Promise<void>) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 export async function watchStates(): Promise<Map<number, WatchState>> {
   const conn = getSettings().media;
   const out = new Map<number, WatchState>();
@@ -86,24 +99,27 @@ export async function watchStates(): Promise<Map<number, WatchState>> {
   if (conn.type === "plex") {
     const { tvdbByAnidb } = await mappingTables();
     type PlexShow = { ratingKey: string; title: string; guid?: string; Guid?: { id: string }[]; leafCount?: number; viewedLeafCount?: number; userRating?: number };
+    const detail: { key: string; state: WatchState }[] = [];
     for (const lib of libs) {
       const d = await plexGet<{ Metadata?: PlexShow[] }>(conn, `/library/sections/${encodeURIComponent(lib)}/all?type=2&includeGuids=1`);
       for (const s of d.Metadata ?? []) {
         const tvdb = plexTvdb(s, tvdbByAnidb);
         if (!tvdb) continue;
         const state: WatchState = { title: s.title, watched: s.viewedLeafCount ?? 0, total: s.leafCount ?? 0, seasons: new Map(), rating: s.userRating ?? null };
-        // Per-season detail only for shows with some progress (one request each).
-        if (state.watched > 0) {
-          const c = await plexGet<{ Metadata?: { index: number; leafCount?: number; viewedLeafCount?: number }[] }>(conn, `/library/metadata/${s.ratingKey}/children`).catch(() => ({ Metadata: [] }));
-          for (const x of c.Metadata ?? []) state.seasons.set(x.index, { watched: x.viewedLeafCount ?? 0, total: x.leafCount ?? 0 });
-        }
+        // Per-season detail only for shows with some progress (one request each, a few at a time).
+        if (state.watched > 0) detail.push({ key: s.ratingKey, state });
         out.set(tvdb, state);
       }
     }
+    await eachLimit(detail, SEASON_CONCURRENCY, async ({ key, state }) => {
+      const c = await plexGet<{ Metadata?: { index: number; leafCount?: number; viewedLeafCount?: number }[] }>(conn, `/library/metadata/${encodeURIComponent(key)}/children`).catch(() => ({ Metadata: [] }));
+      for (const x of c.Metadata ?? []) state.seasons.set(x.index, { watched: x.viewedLeafCount ?? 0, total: x.leafCount ?? 0 });
+    });
   } else if (conn.type === "jellyfin") {
     if (!conn.userId) throw new Error("Pick a Jellyfin user in Settings");
     const u = encodeURIComponent(conn.userId);
     type JfItem = { Id: string; Name: string; IndexNumber?: number; ProviderIds?: Record<string, string>; RecursiveItemCount?: number; ChildCount?: number; UserData?: { UnplayedItemCount?: number; IsFavorite?: boolean; Rating?: number } };
+    const detail: { id: string; state: WatchState }[] = [];
     for (const lib of libs) {
       const d = await jfGet<{ Items: JfItem[] }>(conn, `/Users/${u}/Items?ParentId=${encodeURIComponent(lib)}&IncludeItemTypes=Series&Recursive=true&Fields=ProviderIds,RecursiveItemCount`);
       for (const s of d.Items) {
@@ -112,17 +128,18 @@ export async function watchStates(): Promise<Map<number, WatchState>> {
         const total = s.RecursiveItemCount ?? 0;
         const watched = Math.max(0, total - (s.UserData?.UnplayedItemCount ?? total));
         const state: WatchState = { title: s.Name, watched, total, seasons: new Map(), rating: s.UserData?.IsFavorite ? 10 : (s.UserData?.Rating ?? null) };
-        if (watched > 0) {
-          const seasons = await jfGet<{ Items: JfItem[] }>(conn, `/Shows/${s.Id}/Seasons?userId=${u}&Fields=RecursiveItemCount`).catch(() => ({ Items: [] }));
-          for (const x of seasons.Items) {
-            if (x.IndexNumber === undefined) continue;
-            const t = x.RecursiveItemCount ?? x.ChildCount ?? 0;
-            state.seasons.set(x.IndexNumber, { watched: Math.max(0, t - (x.UserData?.UnplayedItemCount ?? t)), total: t });
-          }
-        }
+        if (watched > 0) detail.push({ id: s.Id, state });
         out.set(tvdb, state);
       }
     }
+    await eachLimit(detail, SEASON_CONCURRENCY, async ({ id, state }) => {
+      const seasons = await jfGet<{ Items: JfItem[] }>(conn, `/Shows/${encodeURIComponent(id)}/Seasons?userId=${u}&Fields=RecursiveItemCount`).catch(() => ({ Items: [] }));
+      for (const x of seasons.Items) {
+        if (x.IndexNumber === undefined) continue;
+        const t = x.RecursiveItemCount ?? x.ChildCount ?? 0;
+        state.seasons.set(x.IndexNumber, { watched: Math.max(0, t - (x.UserData?.UnplayedItemCount ?? t)), total: t });
+      }
+    });
   }
   return out;
 }

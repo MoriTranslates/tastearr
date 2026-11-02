@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { checkOutbound } from "./outbound.js";
 import { patchSettings } from "./settings.js";
 
 /**
@@ -125,7 +126,7 @@ export async function useDiscovered(id: string, url: string, loggedIn: boolean) 
   } catch {
     throw new Error("That isn't a valid address");
   }
-  if (!/^https?:$/.test(u.protocol)) throw new Error("URL must start with http:// or https://");
+  checkOutbound(clean);
   const detected = f.url?.replace(/\/+$/, "") === clean;
   if (!detected) {
     if (!loggedIn) throw new Error("Log in with your password to use a different address, or paste the API key yourself");

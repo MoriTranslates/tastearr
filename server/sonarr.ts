@@ -1,4 +1,5 @@
 import { db } from "./db.js";
+import { checkOutbound } from "./outbound.js";
 import { getSettings, type Settings } from "./settings.js";
 
 export interface SonarrSeason { seasonNumber: number; monitored: boolean; statistics?: { episodeFileCount: number; totalEpisodeCount: number; episodeCount: number } }
@@ -8,7 +9,7 @@ type Conn = Pick<Settings["sonarr"], "url" | "apiKey">;
 
 async function call<T>(method: string, path: string, body?: unknown, conn: Conn = getSettings().sonarr): Promise<T> {
   if (!conn.url || !conn.apiKey) throw new Error("Sonarr is not configured");
-  if (!/^https?:\/\//i.test(conn.url)) throw new Error("Sonarr URL must start with http:// or https://");
+  checkOutbound(conn.url, "The Sonarr address");
   const res = await fetch(`${conn.url}/api/v3${path}`, {
     method,
     headers: { "X-Api-Key": conn.apiKey, "Content-Type": "application/json" },
@@ -229,6 +230,12 @@ export async function seriesMonitored(tvdbId: number) {
   return (await sonarrSeries()).find((x) => x.tvdbId === tvdbId)?.monitored ?? null;
 }
 
+/**
+ * How long "monitor this season" waits for Sonarr to refresh a series from TVDB. Kept well under the usual 60-second
+ * reverse-proxy timeout; when the refresh takes longer the series is set to pick the season up when it appears.
+ */
+export const REFRESH_WAIT = { polls: 10, everyMs: 2000 };
+
 /** Monitors one season of a series that's already in Sonarr (refreshing it first if TVDB is newer) and searches for it. */
 export async function monitorSeason(tvdbId: number, season: number, search = getSettings().sonarr.searchOnAdd) {
   const s = (await sonarrSeries(true)).find((x) => x.tvdbId === tvdbId);
@@ -237,8 +244,8 @@ export async function monitorSeason(tvdbId: number, season: number, search = get
   let full = await call<SonarrSeries>("GET", `/series/${s.id}`, undefined, c);
   if (!full.seasons.some((x) => x.seasonNumber === season)) {
     const cmd = await call<{ id: number }>("POST", "/command", { name: "RefreshSeries", seriesId: s.id }, c);
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < REFRESH_WAIT.polls; i++) {
+      await new Promise((r) => setTimeout(r, REFRESH_WAIT.everyMs));
       const st = await call<{ status: string }>("GET", `/command/${cmd.id}`, undefined, c);
       if (st.status === "completed" || st.status === "failed") break;
     }
