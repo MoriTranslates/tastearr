@@ -12,14 +12,15 @@ import { getProfile } from "./profile.js";
 /** A season's recommendations: candidates, their franchise context fetched, scored against the profile. */
 
 /**
- * `degraded` lists the configured sources that couldn't be read (see Ctx): the picks are fine to show, but anything that
- * sends or writes from them (the season alert, auto-add) must check it first. Not part of the API response.
+ * `degraded` lists the configured sources that couldn't be read (see Ctx), and `partial` the sources a provisional
+ * profile was built without: the picks are fine to show, but anything that sends or writes from them (the season
+ * alert, auto-add) must check both first. Not part of the API response.
  */
 export async function recommend(
   season: Season,
   year: number,
   refresh = false,
-): Promise<{ picks: ScoredPick[]; profileBuiltAt: number; degraded: string[] }> {
+): Promise<{ picks: ScoredPick[]; profileBuiltAt: number; degraded: string[]; partial: string[] }> {
   // One settings snapshot for the whole pass, so a change saved while AniList pages load can't mix two configs.
   const env = tasteEnv();
   env.config = structuredClone(env.config);
@@ -48,7 +49,7 @@ export async function recommend(
   const picks = scoreCandidates(candidates, profile, ctx, env, { carryIds });
   rememberGuesses(picks);
   picks.sort((a, b) => b.match - a.match || b.score - a.score);
-  return { picks, profileBuiltAt: profile.builtAt, degraded: ctx.degraded ?? [] };
+  return { picks, profileBuiltAt: profile.builtAt, degraded: ctx.degraded ?? [], partial: profile.partial ?? [] };
 }
 
 async function mediaOrLog(ids: number[]): Promise<Media[]> {

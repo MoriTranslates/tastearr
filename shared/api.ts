@@ -113,6 +113,11 @@ export interface TasteProfile {
   /** Shows the user clearly enjoyed (one per franchise), for "like X" explanations. */
   favourites: { id: number; title: string; feats: string[] }[];
   sources: Record<string, string>;
+  /**
+   * Set on a provisional profile built while these configured sources couldn't be read (only when there was no stored
+   * profile to keep). Shown, but never used for auto-add or the season alert; replaced by the first complete build.
+   */
+  partial?: string[];
 }
 
 /** GET /api/profile: the profile, or a note that the first one is being built. */

@@ -20,6 +20,8 @@ export const sonarrOptions = (conn: ArrConn = getSettings().sonarr) => sonarr.op
 export interface SeriesLibrary {
   list: SonarrSeries[];
   failed: string[];
+  /** The failed instances by name (`Sonarr "4K"`), for notes shown to the user. */
+  failedNames: string[];
 }
 
 let seriesCache: { at: number; lib: SeriesLibrary } | null = null;
@@ -48,15 +50,17 @@ export async function sonarrLibrary(force = false): Promise<SeriesLibrary> {
   const have = new Set(list.map((x) => x.tvdbId));
   const extra = getSettings().sonarrExtra;
   const failed: string[] = [];
+  const failedNames: string[] = [];
   for (let i = 0; i < extra.length; i++) {
     try {
       for (const x of await sonarr.allSeries(extra[i])) if (!have.has(x.tvdbId)) list.push({ ...x, instance: extra[i].url });
     } catch (e) {
       failed.push(`Sonarr "${extra[i].name}" unreachable: ${(e as Error).message}`);
+      failedNames.push(`Sonarr "${extra[i].name}"`);
     }
   }
   for (const f of failed) console.warn(f);
-  const lib = { list, failed };
+  const lib = { list, failed, failedNames };
   seriesCache = failed.length ? null : { at: Date.now(), lib };
   return lib;
 }

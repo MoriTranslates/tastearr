@@ -40,8 +40,12 @@ const cap = (s: string) => s[0] + s.slice(1).toLowerCase();
 export async function notifySeason(season: Season, year: number, force = false) {
   const n = getSettings().notify;
   if (!force && (!n.seasonAlerts || seasonAnnounced(season, year))) return false;
-  const { picks, degraded } = await recommend(season, year);
+  const { picks, degraded, partial } = await recommend(season, year);
   if (degraded.length) throw new Error(`Season alert skipped because a source couldn't be read: ${degraded.join("; ")}`);
+  if (partial.length)
+    throw new Error(
+      `Season alert skipped: the taste profile is partial (built without ${partial.join(", ")}); it waits for a complete build`,
+    );
   // New to the user only: nothing they already have, rated, follow, watch or carry over from last season.
   const top = picks.filter((p) => !p.excluded && !p.inLibrary && !p.verdict && !p.myStatus && !p.carryOver).slice(0, n.picks);
   if (top.length < Math.min(n.picks, 5)) return false; // season line-up not announced yet

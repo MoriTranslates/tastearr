@@ -9,7 +9,8 @@ import { runAutoAdd } from "../server/services/autoadd.js";
 import { context, invalidateContext } from "../server/services/context.js";
 import { refresh } from "../server/services/jobs.js";
 import { clearOverrides, mappingTables } from "../server/services/mapping.js";
-import { buildProfile, storedProfile } from "../server/services/profile.js";
+import { warnings } from "../server/services/health.js";
+import { buildProfile, getProfile, rebuildProfile, storedProfile } from "../server/services/profile.js";
 import { addMovie } from "../server/services/radarr.js";
 import { patchSettings } from "../server/services/settings.js";
 import { addSeries, forgetSeries, monitorSeason } from "../server/services/sonarr.js";
@@ -201,6 +202,92 @@ describe("item 2: an unreachable extra Sonarr makes ownership unknown, so nothin
   test("monitorSeason says 'can't tell' rather than 'not in Sonarr' when the series may be in the missing instance", async () => {
     w.fail.sonarr2 = 503;
     await quietWarn(() => assert.rejects(monitorSeason(5000, 2), (e: Error & { statusCode?: number }) => e.statusCode === 503));
+  });
+});
+
+describe("fix review #2: a provisional profile when there is nothing to keep, and a source that stays down is pointed out", () => {
+  const cur = seasonOf();
+  const radarrDown = () => {
+    configure({
+      radarr: {
+        url: RADARR,
+        apiKey: "k",
+        qualityProfileId: 4,
+        rootFolderPath: "/movies",
+        tags: [],
+        searchOnAdd: true,
+        minimumAvailability: "released",
+      },
+      notify: { ntfyUrl: NTFY, discordWebhook: "", gotifyUrl: "", gotifyToken: "", seasonAlerts: true, picks: 2 },
+    });
+    w.fail.radarr = 500;
+    invalidateContext();
+  };
+
+  test("a fresh install with Radarr returning 500 gets a partial profile instead of none, and the job doesn't report success", async () => {
+    radarrDown();
+    assert.equal(storedProfile(), null, "fresh install");
+    const p = await quietWarn(() => buildProfile());
+    assert.deepEqual(p.value.partial, ["Radarr"]);
+    assert.deepEqual(storedProfile()?.partial, ["Radarr"]);
+    assert.ok((await getProfile()).features, "picks have a profile to work with");
+    const j = job("profile")!;
+    assert.equal(j.state, "error");
+    assert.match(j.detail, /partial taste profile without Radarr/);
+    assert.ok(
+      warnings().some((x) => /taste profile is partial: Radarr couldn't be read/.test(x)),
+      "the banner says so",
+    );
+  });
+
+  test("the partial profile never feeds auto-add or the season alert, even once every source answers again", async () => {
+    radarrDown();
+    await quietWarn(() => buildProfile());
+    delete w.fail.radarr; // back up, but the provisional profile is still fresh
+    invalidateContext();
+    await quietWarn(() => assert.rejects(runAutoAdd(), /Auto-add skipped: the taste profile is partial \(built without Radarr\)/));
+    assert.equal(w.sonarrAdded.length, 0);
+    assert.equal(autoAddedIds().size, 0);
+    await quietWarn(() => assert.rejects(notifySeason(cur.season, cur.year, true), /Season alert skipped: the taste profile is partial/));
+    assert.equal(w.ntfySent.filter((m) => /anime picks/.test(m.title)).length, 0);
+    assert.equal(seasonAnnounced(cur.season, cur.year), false);
+  });
+
+  test("the first complete build replaces the partial profile", async () => {
+    radarrDown();
+    const partial = (await quietWarn(() => buildProfile())).value;
+    delete w.fail.radarr;
+    invalidateContext();
+    // The next build (the refresh, or getProfile once the retry pause has passed) is complete and replaces it.
+    const p = await rebuildProfile();
+    assert.equal(p.partial, undefined, "complete");
+    assert.deepEqual(await getProfile(), p, "and it is the one used from now on");
+    assert.ok(p.builtAt > partial.builtAt);
+    assert.equal(storedProfile()?.partial, undefined);
+    assert.equal(job("profile")!.state, "done");
+    assert.ok(!warnings().some((x) => /partial/.test(x)));
+    // From now on a source going down keeps this complete profile instead of replacing it.
+    w.fail.radarr = 500;
+    invalidateContext();
+    await quietWarn(() => assert.rejects(buildProfile(), /Kept the last taste profile/));
+    assert.equal(storedProfile()?.builtAt, p.builtAt);
+  });
+
+  test("an extra Sonarr that stays down is named in a warning pointing to Settings, and the warning clears when it answers", async () => {
+    await buildProfile();
+    configure({ sonarrExtra: [{ name: "4K", url: SONARR2, apiKey: "k2" }] });
+    w.fail.sonarr2 = 503;
+    invalidateContext();
+    forgetSeries();
+    await quietWarn(() => context(true));
+    const w4k = warnings().find((x) => x.includes('Sonarr "4K"'));
+    assert.ok(w4k, warnings().join(" | "));
+    assert.match(w4k, /couldn't be read since \d{4}-\d{2}-\d{2}, so your taste profile isn't being updated .* Settings → Connections/);
+    delete w.fail.sonarr2;
+    invalidateContext();
+    forgetSeries();
+    await context(true);
+    assert.ok(!warnings().some((x) => x.includes('Sonarr "4K"')));
   });
 });
 

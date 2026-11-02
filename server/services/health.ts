@@ -4,6 +4,7 @@ import { VERSION } from "../config.js";
 import { seasonOf } from "../core/taste/media.js";
 import { snapshotDatabase } from "../data/backup.js";
 import { listJobs } from "../data/jobs.js";
+import { sourcesDown } from "./context.js";
 import { mappingFileAge } from "./mapping.js";
 import { testMediaServer } from "./mediaserver.js";
 import { isBuilding, storedProfile } from "./profile.js";
@@ -45,6 +46,17 @@ export function warnings() {
   if (seen.proxy)
     out.push(
       "If you use a reverse proxy, set the TRUST_PROXY variable to your proxy's IP address (not a hop count) so login protection sees real client addresses.",
+    );
+  const profile = storedProfile();
+  if (profile?.partial?.length)
+    out.push(
+      `Your taste profile is partial: ${profile.partial.join(", ")} couldn't be read. Picks may show shows you own or watched as new, and auto-add and the season alert wait until every source answers.`,
+    );
+  // A source that stays down keeps the last complete profile forever: point at it so it gets fixed or removed.
+  const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+  for (const d of sourcesDown())
+    out.push(
+      `${d.source} couldn't be read since ${day(d.since)}${profile && !profile.partial?.length ? `, so your taste profile isn't being updated (last built ${day(profile.builtAt)})` : ""}. Fix it or remove it in Settings → Connections.`,
     );
   return out;
 }

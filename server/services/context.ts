@@ -86,15 +86,27 @@ export async function cachedWatch() {
 }
 
 /**
+ * Configured sources that couldn't be read, by name, and when each was first seen failing (cleared when it answers
+ * again). In memory: for the "couldn't be read since ..." warning, so a source that stays down is pointed out.
+ */
+const downSince = new Map<string, number>();
+export function sourcesDown(): { source: string; since: number }[] {
+  return [...downSince].map(([source, since]) => ({ source, since }));
+}
+
+type Missing = { sources: Record<string, string>; degraded: string[]; names: string[] };
+
+/**
  * Loads one configured source; a failure is recorded in `sources` (shown on the Taste page) and in `degraded` instead
  * of failing the build, so the context is still usable for display while writers can tell it is incomplete.
  */
-async function tryLoad<T>(sources: Record<string, string>, degraded: string[], key: string, load: () => Promise<T>): Promise<T | null> {
+async function tryLoad<T>(m: Missing, key: string, name: string, load: () => Promise<T>): Promise<T | null> {
   try {
     return await load();
   } catch (e) {
-    sources[key] = `error: ${(e as Error).message}`;
-    degraded.push(`${key}: ${(e as Error).message}`);
+    m.sources[key] = `error: ${(e as Error).message}`;
+    m.degraded.push(`${key}: ${(e as Error).message}`);
+    m.names.push(name);
     return null;
   }
 }
@@ -103,11 +115,12 @@ async function buildContext(force: boolean): Promise<Ctx> {
   const s = getSettings();
   const sources: Record<string, string> = {};
   const degraded: string[] = [];
+  const m: Missing = { sources, degraded, names: [] };
   const { byAnilist, byTvdb, movieByAnilist, imdbByAnilist } = await mappingTables();
 
   const lib = new Map<number, LibrarySeries>();
   if (s.sonarr.url && s.sonarr.apiKey) {
-    const got = await tryLoad(sources, degraded, "sonarr", () => sonarrLibrary(force));
+    const got = await tryLoad(m, "sonarr", "Sonarr", () => sonarrLibrary(force));
     if (got) {
       for (const x of got.list) lib.set(x.tvdbId, x);
       sources.sonarr = `${lib.size} series`;
@@ -115,13 +128,14 @@ async function buildContext(force: boolean): Promise<Ctx> {
       if (got.failed.length) {
         sources.sonarr += ` (error: ${got.failed.join("; ")})`;
         degraded.push(...got.failed);
+        m.names.push(...got.failedNames);
       }
     }
   }
 
   const movies = new Map<number, LibraryMovie>();
   if (radarrConfigured()) {
-    const list = await tryLoad(sources, degraded, "radarr", () => radarrMovies(force));
+    const list = await tryLoad(m, "radarr", "Radarr", () => radarrMovies(force));
     if (list) {
       for (const x of list) movies.set(x.tmdbId, x);
       sources.radarr = `${movies.size} movies`;
@@ -130,7 +144,7 @@ async function buildContext(force: boolean): Promise<Ctx> {
 
   let watch = new Map<number, WatchState>();
   if (s.media.type !== "none" && s.media.url && s.media.token) {
-    const w = await tryLoad(sources, degraded, "media", watchStates);
+    const w = await tryLoad(m, "media", s.media.type === "plex" ? "Plex" : "Jellyfin", watchStates);
     if (w) {
       watch = w;
       sources.media = `${[...watch.values()].filter((x) => x.watched > 0).length} shows with watch history`;
@@ -148,6 +162,8 @@ async function buildContext(force: boolean): Promise<Ctx> {
 
   const dropped = droppedSet();
   if (dropped.size) sources.dropped = `${dropped.size} shows you're not into`;
+  for (const name of [...downSince.keys()]) if (!m.names.includes(name)) downSince.delete(name);
+  for (const name of m.names) if (!downSince.has(name)) downSince.set(name, Date.now());
   return {
     lib,
     movies,
@@ -164,5 +180,6 @@ async function buildContext(force: boolean): Promise<Ctx> {
     hasHistory: lib.size > 0 || movies.size > 0 || watch.size > 0 || lists.size > 0,
     sources,
     degraded,
+    missing: m.names,
   };
 }

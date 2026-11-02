@@ -37,9 +37,12 @@ export async function buildProfile(
     const ctx = opts.ctx ?? (await context(true));
     // Sonarr, an extra Sonarr, Radarr or the media server didn't answer: a profile learned without it would replace a
     // good one with a worse one (and with no library at all, switch to quiz-only weighting). Keep the stored profile
-    // and fail the job; the next build tries again.
-    if (save && ctx.degraded?.length)
-      throw new Error(`Kept the last taste profile because a source couldn't be read: ${ctx.degraded.join("; ")}`);
+    // and fail the job; the next build tries again. With nothing complete to keep (a fresh install, or the last build
+    // was partial too), build a provisional profile from what did answer, marked `partial`.
+    const missing = save && ctx.degraded?.length ? (ctx.missing?.length ? ctx.missing : ["a source"]) : [];
+    const kept = storedProfile();
+    if (missing.length && kept && !kept.partial?.length)
+      throw new Error(`Kept the last taste profile because a source couldn't be read: ${ctx.degraded!.join("; ")}`);
     const end = opts.until ?? seasonOf();
 
     // A season AniList can't send (rate limit, outage) uses its cached copy, or is left out; the build only fails
@@ -70,11 +73,21 @@ export async function buildProfile(
 
     progress("Scoring genres and tags");
     const profile = computeProfile(items, ctx, env, end);
+    if (missing.length) profile.partial = missing;
     if (save) {
       setValue("profile", JSON.stringify(profile));
-      if (problems.length) noteJobError("profile", problems.join("; "));
-      const note = problems.length ? ` (${problems.length} problem${problems.length > 1 ? "s" : ""}, see the last error)` : "";
-      setJob("profile", "done", `Learned from ${profile.known} shows you've seen or rated${note}`);
+      if (missing.length)
+        // Not a success: the profile is provisional until a build where every source answers.
+        setJob(
+          "profile",
+          "error",
+          `Built a partial taste profile without ${missing.join(", ")} (couldn't be read: ${ctx.degraded!.join("; ")}). Auto-add and the season alert wait for a complete one.`,
+        );
+      else {
+        if (problems.length) noteJobError("profile", problems.join("; "));
+        const note = problems.length ? ` (${problems.length} problem${problems.length > 1 ? "s" : ""}, see the last error)` : "";
+        setJob("profile", "done", `Learned from ${profile.known} shows you've seen or rated${note}`);
+      }
     }
     return profile;
   } catch (e) {
@@ -113,7 +126,8 @@ export const isBuilding = () => building !== null;
  */
 export async function getProfile(maxAgeMs = 86_400_000, opts: { strict?: boolean } = {}): Promise<TasteProfile> {
   const p = storedProfile();
-  if (p && Date.now() - p.builtAt < maxAgeMs) return p;
+  // A partial (provisional) profile is rebuilt as soon as the retry pause allows, so the first complete build replaces it.
+  if (p && Date.now() - p.builtAt < (p.partial?.length ? Math.min(maxAgeMs, PROFILE_RETRY_MS) : maxAgeMs)) return p;
   if (p && Date.now() - lastFailure < PROFILE_RETRY_MS) return p;
   try {
     return await rebuildProfile();

@@ -6,6 +6,7 @@ import { context, invalidateContext } from "./context.js";
 import { firstOfMany, mappingTables } from "./mapping.js";
 import { send } from "./notify.js";
 import { recommend, setFeedback } from "./picks.js";
+import { getProfile } from "./profile.js";
 import { addMovie } from "./radarr.js";
 import { getSettings, radarrConfigured, sonarrConfigured } from "./settings.js";
 import { addSeries, monitorSeason } from "./sonarr.js";
@@ -42,6 +43,12 @@ export async function runAutoAdd() {
     // A fresh library: deciding "add" vs "monitor" from a stale or partial one could add a show the user already owns.
     const ctx = await context(true);
     if (ctx.degraded?.length) throw new Error(`Auto-add skipped because a source couldn't be read: ${ctx.degraded.join("; ")}`);
+    // A provisional profile (built while a source was down) never decides what gets added.
+    const profile = await getProfile();
+    if (profile.partial?.length)
+      throw new Error(
+        `Auto-add skipped: the taste profile is partial (built without ${profile.partial.join(", ")}); it runs after a complete build`,
+      );
     const cur = seasonOf();
     for (const { season, year } of [cur, shiftSeason(cur, 1)]) {
       for (const p of await autoAddCandidates(season, year)) {

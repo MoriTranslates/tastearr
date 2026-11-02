@@ -89,6 +89,8 @@ export interface Ctx {
    * Non-empty means the context is incomplete: fine to show, but nothing may be saved or written from it.
    */
   degraded?: string[];
+  /** The same sources by name (`Radarr`, `Sonarr "4K"`), for notes shown to the user. */
+  missing?: string[];
 }
 
 /** The settings the engine reads. */
