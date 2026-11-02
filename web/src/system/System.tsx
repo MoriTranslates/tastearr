@@ -114,8 +114,16 @@ export function System() {
                 <td className={j.state === "error" ? "error" : ""}>
                   {j.state === "running" ? "⏳ " : j.state === "error" ? "⚠ " : "✓ "}
                   {j.detail}
+                  {j.lastError && j.lastErrorAt && (
+                    <div className="muted small">
+                      Last problem {relTime(j.lastErrorAt)}: {j.lastError}
+                    </div>
+                  )}
                 </td>
-                <td>{j.finishedAt ? relTime(j.finishedAt) : j.startedAt ? `started ${relTime(j.startedAt)}` : ""}</td>
+                <td>
+                  {j.finishedAt ? relTime(j.finishedAt) : j.startedAt ? `started ${relTime(j.startedAt)}` : ""}
+                  {j.lastSuccessAt && j.state !== "done" && <div className="muted small">last success {relTime(j.lastSuccessAt)}</div>}
+                </td>
               </tr>
             ))}
           </tbody>

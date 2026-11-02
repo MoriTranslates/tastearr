@@ -221,7 +221,28 @@ describe("Taste and System", () => {
         version: "0.6.0",
         uptime: 5000,
         node: "v24.1.0",
-        jobs: [{ name: "refresh", state: "error", detail: "AniList is having trouble", startedAt: 1, finishedAt: 2 }],
+        jobs: [
+          {
+            name: "refresh",
+            state: "error",
+            detail: "AniList is having trouble",
+            startedAt: 1,
+            finishedAt: 2,
+            lastError: "AniList refused the request (HTTP 401)",
+            lastErrorAt: Date.now() - 60_000,
+            lastSuccessAt: Date.now() - 3_600_000,
+          },
+          {
+            name: "profile",
+            state: "done",
+            detail: "Learned",
+            startedAt: 1,
+            finishedAt: 2,
+            lastError: null,
+            lastErrorAt: null,
+            lastSuccessAt: 2,
+          },
+        ],
       },
       "GET /system/health": { checks: [{ name: "Sonarr", ok: false, detail: "HTTP 401" }] },
       "POST /system/backup": () => apiError(403, "Wrong password"),
@@ -229,6 +250,8 @@ describe("Taste and System", () => {
     wrap(<System />);
     assert.ok(await screen.findByText(/AniList is having trouble/));
     assert.ok(await screen.findByText(/Problem: HTTP 401/));
+    assert.ok(screen.getByText(/Last problem .*: AniList refused the request \(HTTP 401\)/));
+    assert.ok(screen.getByText(/last success/));
     types(screen.getByLabelText("Your password"), "bad");
     fireEvent.click(screen.getByRole("button", { name: "Download backup" }));
     assert.ok((await screen.findAllByText("Wrong password")).length >= 1);

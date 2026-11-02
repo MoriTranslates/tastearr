@@ -31,9 +31,9 @@ after(async () => {
   await app.close();
 });
 
-test("using a detected app that is gone is a 400 with its message, not a 500", async () => {
+test("using a detected app that is gone is a 404 with its message, not a 500", async () => {
   const res = await call("POST", "/api/discover/use", { id: "nope", url: "http://192.168.1.9:8989" });
-  assert.equal(res.statusCode, 400);
+  assert.equal(res.statusCode, 404, "the service's own status passes through userFacing");
   assert.equal(res.json().error, "That app is no longer detected");
 });
 

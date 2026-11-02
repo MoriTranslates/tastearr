@@ -155,6 +155,10 @@ export interface Job {
   detail: string;
   startedAt: number | null;
   finishedAt: number | null;
+  /** The last failure, kept when a later run succeeds, so System can show when and why a job last went wrong. */
+  lastError: string | null;
+  lastErrorAt: number | null;
+  lastSuccessAt: number | null;
 }
 
 export interface ArrSettings {

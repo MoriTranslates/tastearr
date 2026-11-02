@@ -6,12 +6,6 @@ import { db } from "./db.js";
  * failure kept separately, so a run that succeeds after a failure doesn't erase when and why it failed.
  */
 
-export interface JobHistory {
-  lastError: string | null;
-  lastErrorAt: number | null;
-  lastSuccessAt: number | null;
-}
-
 export function setJob(name: string, state: "running" | "done" | "error", detail = "") {
   const now = Date.now();
   db.prepare(
@@ -47,11 +41,11 @@ export function noteJobError(name: string, message: string) {
   ).run(name, now, now, message, now);
 }
 
-export function listJobs(): (Job & JobHistory)[] {
+export function listJobs(): Job[] {
   return db
     .prepare(
       `SELECT name, state, detail, started_at AS startedAt, finished_at AS finishedAt, last_error AS lastError,
          last_error_at AS lastErrorAt, last_success_at AS lastSuccessAt FROM jobs ORDER BY name`,
     )
-    .all() as unknown as (Job & JobHistory)[];
+    .all() as unknown as Job[];
 }

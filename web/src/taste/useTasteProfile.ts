@@ -38,7 +38,18 @@ export function useTasteProfile(onRebuildError: (message: string) => void) {
   /** Starts a rebuild and follows its job until it finishes, then shows the new profile. */
   async function rebuild() {
     await api("/profile/rebuild", { body: {} });
-    setJob({ name: "profile", state: "running", detail: "Starting", startedAt: Date.now(), finishedAt: null });
+    // Keep the known failure history while the new run starts.
+    setJob((prev) => ({
+      lastError: null,
+      lastErrorAt: null,
+      lastSuccessAt: null,
+      ...prev,
+      name: "profile",
+      state: "running",
+      detail: "Starting",
+      startedAt: Date.now(),
+      finishedAt: null,
+    }));
     stopRebuildPoll.current?.();
     stopRebuildPoll.current = pollUntil({
       step: async () => profileJob((await api<{ jobs: Job[] }>("/system")).jobs),
