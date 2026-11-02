@@ -13,8 +13,9 @@
     "dev:web": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "start": "node --no-warnings=ExperimentalWarning dist/server/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
-    "eval": "node --no-warnings=ExperimentalWarning dist/server/eval.js"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p test/tsconfig.json",
+    "eval": "node --no-warnings=ExperimentalWarning dist/server/eval.js",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
