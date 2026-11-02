@@ -291,6 +291,22 @@ describe("fix review #2: a provisional profile when there is nothing to keep, an
   });
 });
 
+describe("fix review #13: auto-add failures don't leave the refresh 'done'", () => {
+  test("two of three adds fail (Sonarr refuses them): the refresh reports it, naming the shows, and the one that worked is kept", async () => {
+    await buildProfile();
+    patchSettings((s) => ({ ...s, auth: { ...s.auth, passwordHash: "set" } }));
+    w.failAddFor.add(5001);
+    w.failAddFor.add(5002);
+    invalidateContext();
+    forgetSeries();
+    await quietWarn(() => refresh(() => undefined));
+    const r = job("refresh")!;
+    assert.equal(r.state, "error", "not shown as a plain success");
+    assert.match(r.detail, /auto-add: 2 of 3 shows failed \(retried next run\): Journey [12]: .*; Journey [12]: /);
+    assert.deepEqual([...autoAddedIds()], [300], "the add that worked is recorded");
+  });
+});
+
 describe("fix review #4: the refresh's profile step fails inside the retry pause too", () => {
   test("Sonarr down: a rebuild failed minutes ago (Picks opened), then the refresh runs; its profile step reports the failure", async () => {
     const good = await buildProfile();

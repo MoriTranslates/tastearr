@@ -34,11 +34,20 @@ let running = false;
 
 /** Runs auto-add for the current and next season. Returns what was added; failures are retried next run. */
 export async function runAutoAdd() {
+  return (await runAutoAddDetailed()).added;
+}
+
+/**
+ * runAutoAdd, also reporting the shows whose add failed ("title: reason") and how many were tried, so the background
+ * refresh can show a partial failure instead of "done".
+ */
+export async function runAutoAddDetailed() {
   const s = getSettings();
-  if (!s.autoAdd.enabled || running) return [];
-  running = true;
   const added: { title: string; detail: string }[] = [];
   const failed: string[] = [];
+  let tried = 0;
+  if (!s.autoAdd.enabled || running) return { added, failed, tried };
+  running = true;
   try {
     // A fresh library: deciding "add" vs "monitor" from a stale or partial one could add a show the user already owns.
     const ctx = await context(true);
@@ -52,6 +61,7 @@ export async function runAutoAdd() {
     const cur = seasonOf();
     for (const { season, year } of [cur, shiftSeason(cur, 1)]) {
       for (const p of await autoAddCandidates(season, year)) {
+        tried++;
         try {
           const detail = await apply(p, s.autoAdd.search);
           // Already there and nothing to turn on: not something auto-add did, so it isn't recorded ("at most once").
@@ -73,9 +83,11 @@ export async function runAutoAdd() {
         title: `Tastearr added ${added.length} show${added.length > 1 ? "s" : ""}`,
         body: added.map((a) => `${a.title} → ${a.detail}`).join("\n"),
         url: ext ? `${ext}/settings` : undefined,
+        // The summary is a courtesy: the adds are already recorded and listed under auto-add history, and send()
+        // logs which channels failed.
       }).catch(() => undefined);
     }
-    return added;
+    return { added, failed, tried };
   } finally {
     running = false;
   }

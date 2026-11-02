@@ -1,7 +1,7 @@
 import { inBackground } from "../adapters/anilist.js";
 import { seasonOf, shiftSeason } from "../core/taste/media.js";
 import { setJob } from "../data/jobs.js";
-import { runAutoAdd } from "./autoadd.js";
+import { runAutoAddDetailed } from "./autoadd.js";
 import { context } from "./context.js";
 import { announceAired } from "./following.js";
 import { notifySeason } from "./notify.js";
@@ -48,7 +48,11 @@ async function refreshSteps(warn: Log) {
       await step("picks", () => recommend(cur.season, cur.year));
       await step("season alert", () => notifySeason(next.season, next.year));
     }
-    await step("auto-add", () => runAutoAdd());
+    await step("auto-add", async () => {
+      // Shows that failed are retried next run, but the run is a partial failure, not "up to date".
+      const r = await runAutoAddDetailed();
+      if (r.failed.length) throw new Error(`${r.failed.length} of ${r.tried} shows failed (retried next run): ${r.failed.join("; ")}`);
+    });
   }
   if (failed.length) {
     setJob("refresh", "error", failed.join("; "));
