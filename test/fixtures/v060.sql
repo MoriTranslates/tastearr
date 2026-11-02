@@ -1,0 +1,32 @@
+-- A database as v0.6.0 leaves it (schema version 6) with the kind of rows real installs hold. Hand-written.
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE media (id INTEGER PRIMARY KEY, season TEXT, year INTEGER, data TEXT NOT NULL, fetched_at INTEGER NOT NULL);
+CREATE INDEX media_season ON media (season, year);
+CREATE TABLE season_fetch (season TEXT NOT NULL, year INTEGER NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (season, year));
+CREATE TABLE feedback (anilist_id INTEGER PRIMARY KEY, verdict TEXT NOT NULL, source TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE dropped (tvdb_id INTEGER PRIMARY KEY, title TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE notified (season TEXT NOT NULL, year INTEGER NOT NULL, PRIMARY KEY (season, year));
+CREATE TABLE list_entries (source TEXT NOT NULL, anilist_id INTEGER NOT NULL, status TEXT NOT NULL, score INTEGER, progress INTEGER, PRIMARY KEY (source, anilist_id));
+CREATE TABLE jobs (name TEXT PRIMARY KEY, state TEXT NOT NULL, detail TEXT, started_at INTEGER, finished_at INTEGER);
+CREATE TABLE following (anilist_id INTEGER PRIMARY KEY, title TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE aired_notified (anilist_id INTEGER NOT NULL, episode INTEGER NOT NULL, PRIMARY KEY (anilist_id, episode));
+CREATE TABLE mapping_overrides (anilist_id INTEGER PRIMARY KEY, tvdb_id INTEGER NOT NULL, season INTEGER, at INTEGER NOT NULL);
+CREATE TABLE auto_added (anilist_id INTEGER PRIMARY KEY, title TEXT NOT NULL, season TEXT NOT NULL, year INTEGER NOT NULL, match INTEGER NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE revoked_sessions (hash TEXT PRIMARY KEY, exp INTEGER NOT NULL);
+
+INSERT INTO settings VALUES ('settings', '{"sonarr":{"url":"http://192.168.1.5:8989","apiKey":"fixture-key","qualityProfileId":4}}');
+INSERT INTO settings VALUES ('profile', '{"builtAt":1700000000000,"features":{}}');
+INSERT INTO feedback VALUES (154587, 'loved', 'quiz', 1700000000000), (1, 'hidden', 'picks', 1700000000001);
+INSERT INTO dropped VALUES (424536, '葬送のフリーレン', 1700000000000);
+INSERT INTO notified VALUES ('WINTER', 2025);
+INSERT INTO list_entries VALUES ('anilist', 154587, 'COMPLETED', 90, 28), ('mal', 52991, 'DROPPED', NULL, 2);
+INSERT INTO jobs VALUES ('profile', 'done', 'Learned from 120 shows', 1700000000000, 1700000005000);
+INSERT INTO following VALUES (5, '【推しの子】', 1700000000000);
+INSERT INTO aired_notified VALUES (5, 1), (5, 2);
+INSERT INTO mapping_overrides VALUES (99, 123456, NULL, 1700000000000);
+INSERT INTO auto_added VALUES (7, 'Re:ZERO "S3" & more', 'FALL', 2024, 88, 'Sonarr, all seasons', 1700000000000);
+INSERT INTO revoked_sessions VALUES ('abc123', 9999999999999);
+INSERT INTO media VALUES (154587, 'FALL', 2023, '{"id":154587,"_v":3,"title":{"native":"葬送のフリーレン","romaji":"Sousou no Frieren","english":null}}', 1700000000000);
+INSERT INTO media VALUES (8, 'FALL', 2023, '{"id":8,"_v":2,"title":{}}', 1700000000000);
+INSERT INTO season_fetch VALUES ('FALL', 2023, 1700000000000);
+PRAGMA user_version = 6;
