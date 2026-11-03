@@ -62,16 +62,57 @@ const MIGRATIONS: string[] = [
    UPDATE jobs SET last_success_at = finished_at WHERE state = 'done';`,
 ];
 
-const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-// A database last used by a newer Tastearr (downgraded image, a backup from a newer version): its schema has steps
-// this build doesn't know, so running against it could misread or damage it. Stop before writing anything.
-if (current > MIGRATIONS.length) {
-  console.error(
-    `This tastearr.db was last used by a newer version of Tastearr (database version ${current}; this version knows up to ${MIGRATIONS.length}). Update Tastearr to the newer version again, or restore a backup made with this version. Nothing was changed.`,
-  );
-  db.close();
+/** Startup can't go on: say why in the container log and exit, without touching the database further. */
+function stop(message: string): never {
+  console.error(message);
+  try {
+    db.close();
+  } catch {
+    // Closing a damaged or half-open database can fail too; the process exits next either way.
+  }
   process.exit(1);
 }
+
+// Read-only checks first: a damaged file, or one that isn't a database, stops startup before anything is written.
+let current = 0;
+try {
+  current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  const problems = (db.prepare("PRAGMA quick_check(5)").all() as { quick_check: string }[]).map((r) => r.quick_check);
+  if (problems.join() !== "ok") throw new Error(problems.join("; "));
+} catch (e) {
+  stop(
+    `tastearr.db is damaged or isn't a Tastearr database (${(e as Error).message}). Nothing was changed. Stop Tastearr and restore a backup (System -> Backup), or move tastearr.db aside to start fresh.`,
+  );
+}
+// A database last used by a newer Tastearr (downgraded image, a backup from a newer version): its schema has steps
+// this build doesn't know, so running against it could misread or damage it. Stop before writing anything.
+if (current > MIGRATIONS.length)
+  stop(
+    `This tastearr.db was last used by a newer version of Tastearr (database version ${current}; this version knows up to ${MIGRATIONS.length}). Update Tastearr to the newer version again, or restore a backup made with this version. Nothing was changed.`,
+  );
+
+// Before upgrading an existing database, keep a copy of it as it was ("tastearr-before-v<N>.db", next to it): written
+// to a temporary file and renamed, created exclusively and owner-only (it holds every API key). An existing copy for
+// that version is kept (it is the older one). If the copy can't be made, nothing is migrated.
+if (current > 0 && current < MIGRATIONS.length) {
+  const copy = path.join(CONFIG_DIR, `tastearr-before-v${current}.db`);
+  if (!fs.existsSync(copy)) {
+    const tmp = `${copy}.tmp`;
+    try {
+      fs.rmSync(tmp, { force: true }); // left by a start that was killed while copying
+      fs.closeSync(fs.openSync(tmp, "wx", 0o600));
+      db.prepare("VACUUM INTO ?").run(tmp);
+      fs.renameSync(tmp, copy);
+    } catch (e) {
+      // Only a plain file is ours to remove; anything else at that name is left for the user to look at.
+      if (fs.existsSync(tmp) && fs.statSync(tmp).isFile()) fs.rmSync(tmp, { force: true });
+      stop(
+        `Couldn't make a safety copy of tastearr.db before upgrading it (${(e as Error).message}). Nothing was changed. Check that ${CONFIG_DIR} has free space and is writable, then start Tastearr again.`,
+      );
+    }
+  }
+}
+
 db.exec("PRAGMA journal_mode = WAL;");
 for (let v = current; v < MIGRATIONS.length; v++) {
   db.exec("BEGIN");
