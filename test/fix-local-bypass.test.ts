@@ -2,7 +2,7 @@ import "./env.ts";
 import assert from "node:assert/strict";
 import { after, afterEach, before, test } from "node:test";
 import { app } from "../server/http/app.js";
-import { SETUP_TOKEN } from "../server/http/auth.js";
+import { localNetworkWarnings, SETUP_TOKEN } from "../server/http/auth.js";
 import { setBypassLocal } from "../server/services/settings.js";
 
 /**
@@ -72,4 +72,21 @@ test("Docker's 172.16/12 and loopback are never local, even when TASTEARR_LOCAL_
 test("an internet address is never local", async () => {
   assert.equal((await settings("203.0.113.9")).statusCode, 401);
   assert.equal((await settings("::ffff:203.0.113.9")).statusCode, 401);
+});
+
+test("fix review #12: an IPv6 ULA peer (Docker's IPv6 bridge gateway) is not local; IPv6 link-local still is", async () => {
+  for (const peer of ["fd00::1", "fd12:3456::1", "fc00::5"]) assert.equal((await settings(peer)).statusCode, 401, peer);
+  assert.equal((await settings("fe80::1")).statusCode, 200);
+});
+
+test("fix review #12: a TASTEARR_LOCAL_NETWORKS range the bypass will ignore is named in a startup warning", () => {
+  process.env.TASTEARR_LOCAL_NETWORKS = "172.20.0.0/16, 10.0.0.0/8, 127.0.0.0/8, 172.0.0.0/8";
+  const w = localNetworkWarnings();
+  assert.equal(w.length, 1);
+  assert.match(w[0], /172\.20\.0\.0\/16, 127\.0\.0\.0\/8, 172\.0\.0\.0\/8/);
+  assert.match(w[0], /never count as local/);
+  process.env.TASTEARR_LOCAL_NETWORKS = "10.20.0.0/16";
+  assert.deepEqual(localNetworkWarnings(), []);
+  delete process.env.TASTEARR_LOCAL_NETWORKS;
+  assert.deepEqual(localNetworkWarnings(), []);
 });

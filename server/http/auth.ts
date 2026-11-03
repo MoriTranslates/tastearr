@@ -80,17 +80,36 @@ export function isLocalRequest(req: FastifyRequest) {
 
 /**
  * The home network, for the "disabled for local addresses" bypass and for claiming a fresh install: 10/8, 192.168/16
- * and IPv6 ULA/link-local by default. 172.16/12 (Docker's own networks: Docker's NAT gateway or docker-proxy, e.g. for
- * IPv6 or Docker Desktop, would make internet requests arrive from 172.17.0.1) and loopback (a tunnel or proxy on the
- * same host) are not in the defaults. TASTEARR_LOCAL_NETWORKS (comma-separated IPv4 CIDRs) replaces the defaults, but
- * isLocalRequest still refuses 172.16/12 and loopback peers.
+ * and IPv6 link-local by default. Not Docker's own networks (172.16/12; IPv6 ULA, used by Docker's IPv6 bridges): its
+ * NAT gateway or docker-proxy can make internet requests arrive from 172.17.0.1 or fd00::1. Not loopback (a tunnel or
+ * proxy on the same host). TASTEARR_LOCAL_NETWORKS (comma-separated IPv4 CIDRs) replaces the defaults, but
+ * isLocalRequest still refuses 172.16/12 and loopback peers (see localNetworkWarnings).
  */
 export function isHomeNetwork(ip: string) {
-  const custom = (process.env.TASTEARR_LOCAL_NETWORKS ?? "")
+  return inHomeNetwork(ip, customNetworks());
+}
+
+const customNetworks = () =>
+  (process.env.TASTEARR_LOCAL_NETWORKS ?? "")
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean);
-  return inHomeNetwork(ip, custom);
+
+/**
+ * Startup warnings: TASTEARR_LOCAL_NETWORKS entries overlapping Docker's 172.16/12 or loopback, which the bypass
+ * ignores whatever the variable says. A home LAN that really uses 172.16/12 would otherwise lose the bypass silently.
+ */
+export function localNetworkWarnings(): string[] {
+  const never = ["172.16.0.0/12", "127.0.0.0/8"];
+  const overlaps = (c: string) => {
+    const base = c.split("/")[0];
+    return never.some((n) => inCidr(base, n) || inCidr(n.split("/")[0], c));
+  };
+  const ignored = customNetworks().filter(overlaps);
+  if (!ignored.length) return [];
+  return [
+    `TASTEARR_LOCAL_NETWORKS lists ${ignored.join(", ")}, but addresses in 172.16.0.0/12 (Docker's own networks) and 127.0.0.0/8 (loopback) never count as local: logins from there always need the password.`,
+  ];
 }
 
 /** The socket peer is a loopback or a trusted proxy: then it isn't the user's device. */

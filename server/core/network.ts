@@ -25,14 +25,16 @@ export function inCidr(ip: string, cidr: string) {
 }
 
 /**
- * The home network: 10/8, 192.168/16 and IPv6 ULA/link-local by default, or exactly the given IPv4 CIDRs. 172.16/12
- * (Docker's own networks) and loopback never count by default: see http/auth.ts.
+ * The home network: 10/8, 192.168/16 and IPv6 link-local (fe80::/10) by default, or exactly the given IPv4 CIDRs.
+ * Docker's own networks never count: 172.16/12 for IPv4, and IPv6 ULA (fc00::/7), which Docker's IPv6 bridges use (an
+ * internet request through docker-proxy can arrive from the bridge gateway, e.g. fd00::1). Loopback doesn't either.
+ * http/auth.ts also refuses 172.16/12 and loopback peers when TASTEARR_LOCAL_NETWORKS lists them.
  */
 export function isHomeNetwork(ip: string, custom: string[] = []) {
   if (custom.length) return custom.some((c) => inCidr(ip, c));
   const a = v4(ip);
   if (net.isIPv4(a)) return inCidr(a, "10.0.0.0/8") || inCidr(a, "192.168.0.0/16");
-  return /^f[cd]/i.test(ip) || /^fe[89ab][0-9a-f]:/i.test(ip);
+  return /^fe[89ab][0-9a-f]:/i.test(ip);
 }
 
 /** The socket peer is loopback: then it is a proxy or tunnel on the same host, not the user's device. */

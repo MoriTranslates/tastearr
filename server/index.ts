@@ -1,7 +1,7 @@
 import { PORT } from "./config.js";
 import { closeDb } from "./data/db.js";
 import { app } from "./http/app.js";
-import { SETUP_TOKEN } from "./http/auth.js";
+import { localNetworkWarnings, SETUP_TOKEN } from "./http/auth.js";
 import { startJobs } from "./services/jobs.js";
 import { getSettings } from "./services/settings.js";
 
@@ -29,6 +29,7 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
 await app.listen({ host: "0.0.0.0", port: PORT });
+for (const w of localNetworkWarnings()) app.log.warn(w);
 if (!getSettings().auth.passwordHash)
   app.log.warn(
     `No account yet. Open Tastearr from your home network to create one, or use setup code ${SETUP_TOKEN} from elsewhere (one-time, changes on restart, safe to redact from shared logs).`,

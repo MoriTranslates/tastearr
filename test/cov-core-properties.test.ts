@@ -423,7 +423,8 @@ describe("network helpers", () => {
     assert.equal(isHomeNetwork("172.17.0.2"), false);
     assert.equal(isHomeNetwork("127.0.0.1"), false);
     assert.equal(isHomeNetwork("8.8.8.8"), false);
-    assert.equal(isHomeNetwork("fd12::1"), true);
+    assert.equal(isHomeNetwork("fd12::1"), false, "IPv6 ULA is what Docker's IPv6 bridges use (fix review #12)");
+    assert.equal(isHomeNetwork("fe80::1"), true);
     assert.equal(isHomeNetwork("172.17.0.2", ["172.16.0.0/12"]), true);
     assert.equal(isHomeNetwork("192.168.1.20", ["10.0.0.0/8"]), false, "custom networks replace the defaults");
   });

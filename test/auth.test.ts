@@ -13,9 +13,20 @@ afterEach(() => {
   delete process.env.TASTEARR_ALLOWED_HOSTS;
 });
 
-test("home network: 10/8, 192.168/16 and IPv6 ULA/link-local; never Docker's 172.16/12 or loopback", () => {
-  for (const ip of ["10.0.0.5", "192.168.1.20", "::ffff:192.168.0.9", "fd12:3456::1", "fe80::1"]) assert.equal(isHomeNetwork(ip), true, ip);
-  for (const ip of ["172.17.0.1", "172.18.0.1", "::ffff:172.17.0.1", "127.0.0.1", "::1", "8.8.8.8", "2001:db8::1", "100.64.0.1"])
+test("home network: 10/8, 192.168/16 and IPv6 link-local; never Docker's 172.16/12 or IPv6 ULA, or loopback", () => {
+  for (const ip of ["10.0.0.5", "192.168.1.20", "::ffff:192.168.0.9", "fe80::1"]) assert.equal(isHomeNetwork(ip), true, ip);
+  for (const ip of [
+    "172.17.0.1",
+    "172.18.0.1",
+    "::ffff:172.17.0.1",
+    "fd12:3456::1",
+    "fd00::1",
+    "127.0.0.1",
+    "::1",
+    "8.8.8.8",
+    "2001:db8::1",
+    "100.64.0.1",
+  ])
     assert.equal(isHomeNetwork(ip), false, ip);
 });
 
