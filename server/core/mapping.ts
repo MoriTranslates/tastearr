@@ -73,11 +73,12 @@ export function buildTables(rows: AnimeListRow[], overrides: { anilistId: number
 /** Points an AniList id at a TVDB series, taking it out of the previous series' list so watch history doesn't mix. */
 export function place(t: MappingTables, anilistId: number, m: Mapping) {
   const old = t.byAnilist.get(anilistId);
-  if (old && old.tvdbId !== m.tvdbId)
-    t.byTvdb.set(
-      old.tvdbId,
-      (t.byTvdb.get(old.tvdbId) ?? []).filter((x) => x !== anilistId),
-    );
+  if (old && old.tvdbId !== m.tvdbId) {
+    const left = (t.byTvdb.get(old.tvdbId) ?? []).filter((x) => x !== anilistId);
+    // No entries left: drop the key, or the series would still count as "claimed" (byTvdb.has) by inferMapping.
+    if (left.length) t.byTvdb.set(old.tvdbId, left);
+    else t.byTvdb.delete(old.tvdbId);
+  }
   t.byAnilist.set(anilistId, m);
   t.byTvdb.set(m.tvdbId, [...new Set([...(t.byTvdb.get(m.tvdbId) ?? []), anilistId])]);
 }

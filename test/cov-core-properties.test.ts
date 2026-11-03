@@ -13,6 +13,7 @@ import { OutboundError } from "../server/core/outbound.js";
 import { applyUpdate, loadSettings, MASK, toPublicSettings } from "../server/core/settings.js";
 import { SEASONS, seasonIdx, seasonOf, shiftSeason, type Media } from "../server/core/taste/media.js";
 import { scoreCandidates, toMatch } from "../server/core/taste/score.js";
+import { inferMapping } from "../server/core/taste/sequels.js";
 import type { LibrarySeries, TasteEnv } from "../server/core/taste/types.js";
 import { emptyCtx, media, tags } from "./helpers.ts";
 
@@ -308,6 +309,22 @@ describe("mapping tables", () => {
     const t = buildTables([row(8, 70, 1), row(8, 70, 2)], []);
     assert.deepEqual(t.byTvdb.get(70), [8]);
     assert.deepEqual(t.byAnilist.get(8), { tvdbId: 70, season: 2 });
+  });
+
+  test("fix review #7: a series left with no AniList entries is no longer in byTvdb (it isn't 'claimed')", () => {
+    const t = buildTables([row(1, 10, 1), row(1, 20, 1)], []);
+    assert.equal(t.byTvdb.has(10), false, "listed twice: the first series keeps no empty entry");
+    assert.deepEqual(t.byTvdb.get(20), [1]);
+    place(t, 1, { tvdbId: 30, season: 1 });
+    assert.equal(t.byTvdb.has(20), false, "a hand-picked match moving the last entry away");
+  });
+
+  test("fix review #7: a new show matches an owned series that only an earlier, moved-away list entry pointed at", () => {
+    const t = buildTables([row(1, 10, 1), row(1, 20, 1)], []);
+    const owned = { tvdbId: 10, title: "Hoshi no Tabi", seriesType: "anime", year: 2030, seasons: [{ seasonNumber: 1 }] };
+    const ctx = emptyCtx({ lib: new Map([[10, owned as never]]), byTvdb: t.byTvdb, byAnilist: t.byAnilist });
+    const m = media(500, { title: { romaji: "Hoshi no Tabi", english: null, native: null }, seasonYear: 2030 });
+    assert.deepEqual(inferMapping(m, null, ctx), { tvdbId: 10, season: 1 });
   });
 
   test("place: moving an id removes it from the old series, is idempotent, and works for unseen ids", () => {
