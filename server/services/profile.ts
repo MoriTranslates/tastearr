@@ -1,5 +1,5 @@
 import type { TasteProfile } from "../../shared/api.js";
-import { inBackground } from "../adapters/anilist.js";
+import { awaitShared, inBackground } from "../adapters/anilist.js";
 import { eligible } from "../core/taste/features.js";
 import { seasonOf, shiftSeason, type Media, type Season } from "../core/taste/media.js";
 import { acceptExtra, computeProfile, extraTrainingIds } from "../core/taste/profile.js";
@@ -137,10 +137,11 @@ export async function getProfile(maxAgeMs = 86_400_000, opts: { strict?: boolean
     return p;
   }
   try {
-    return await rebuildProfile();
+    // A page (interactive) waits at most the interactive deadline for the rebuild, which runs in the background lane.
+    return await awaitShared(rebuildProfile(), "Your taste profile");
   } catch (e) {
     if (!p || opts.strict) throw e;
-    console.warn(`Profile rebuild failed, using the one from ${new Date(p.builtAt).toISOString()}: ${(e as Error).message}`);
+    console.warn(`Profile not rebuilt (yet), using the one from ${new Date(p.builtAt).toISOString()}: ${(e as Error).message}`);
     return p;
   }
 }

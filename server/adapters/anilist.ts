@@ -44,6 +44,29 @@ export function inBackground<T>(fn: () => Promise<T>): Promise<T> {
 }
 const isInteractive = () => lane.getStore() !== "background";
 
+/**
+ * The timer for awaitShared's deadline, taken when this module loads. Tests make long waits (rate limits, backoff)
+ * instant by replacing setTimeout; a deadline that fired instantly would fail every interactive caller instead.
+ */
+const deadlineTimer = globalThis.setTimeout;
+
+/**
+ * Awaits shared work that may run in the background lane (a quiz pool or profile build started by a timer, joined by a
+ * page). An interactive caller waits at most `interactiveTotalMs`, then gets an error saying `what` is still being
+ * prepared; the work itself carries on. A background caller just waits.
+ */
+export function awaitShared<T>(p: Promise<T>, what: string): Promise<T> {
+  if (!isInteractive()) return p;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = deadlineTimer(
+      () => reject(new Error(`${what} is still being prepared in the background; try again in a minute.`)),
+      ANILIST_LIMITS.interactiveTotalMs,
+    );
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
 const rateLimited = (ms: number) => new Error(`AniList's rate limit was hit; try again in ${Math.ceil(ms / 1000)} seconds.`);
 
 // The scheduler: one start every `gap()`, shared by both lanes, interactive first. `nextAt` is the earliest the next

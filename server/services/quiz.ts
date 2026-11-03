@@ -1,4 +1,4 @@
-import { popularIdsBatch, type PopularFilter } from "../adapters/anilist.js";
+import { awaitShared, popularIdsBatch, type PopularFilter } from "../adapters/anilist.js";
 import { allGenres, type Media } from "../core/taste/media.js";
 import { quizAnswers } from "../data/feedback.js";
 import { getValue, setValue } from "../data/kv.js";
@@ -95,7 +95,8 @@ async function loadPool() {
     }
   }
   building ??= buildPool().finally(() => (building = null));
-  await building;
+  // The build may have been started by the startup prewarm (background lane); a page joining it still fails fast.
+  await awaitShared(building, "The quiz");
 }
 
 /** Called at startup on a new install, so the quiz is ready by the time someone reaches it. */
