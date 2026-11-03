@@ -46,21 +46,27 @@ export function tasteEnv(): TasteEnv {
 /** A show's title in the language the user picked. */
 export const titleOf = (m: Media) => title(m, getSettings().display.titleLanguage);
 
-let ctxCache: { at: number; ctx: Ctx } | null = null;
+let ctxCache: { at: number; ctx: Ctx; gen: number; force: boolean } | null = null;
 /** A build in progress, shared by callers that arrive meanwhile (each one would otherwise rescan Sonarr and Plex). */
-let ctxBuilding: { gen: number; p: Promise<Ctx> } | null = null;
+let ctxBuilding: { gen: number; force: boolean; p: Promise<Ctx> } | null = null;
 /** Bumped by invalidateContext: a build that started before a change must not be cached or shared afterwards. */
 let ctxGen = 0;
 
+/**
+ * The user context, cached for 10 minutes. `force` reads every source fresh; it never joins a build in progress that
+ * wasn't forced (that one may reuse library lists cached for minutes), only another forced one.
+ */
 export async function context(force = false): Promise<Ctx> {
   if (!force && ctxCache && Date.now() - ctxCache.at < 10 * 60_000) return ctxCache.ctx;
-  if (ctxBuilding?.gen === ctxGen) return ctxBuilding.p;
+  if (ctxBuilding?.gen === ctxGen && (ctxBuilding.force || !force)) return ctxBuilding.p;
   const gen = ctxGen;
   const p = buildContext(force).then((ctx) => {
-    if (gen === ctxGen) ctxCache = { at: Date.now(), ctx };
+    // A non-forced build finishing after a forced one of the same generation must not replace the fresher result.
+    const staler = !force && ctxCache?.gen === gen && ctxCache.force;
+    if (gen === ctxGen && !staler) ctxCache = { at: Date.now(), ctx, gen, force };
     return ctx;
   });
-  ctxBuilding = { gen, p };
+  ctxBuilding = { gen, force, p };
   void p
     .finally(() => {
       if (ctxBuilding?.p === p) ctxBuilding = null;

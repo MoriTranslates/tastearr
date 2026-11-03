@@ -1,5 +1,6 @@
 import { selectAutoAdd, type AutoAddPick } from "../core/autoadd.js";
 import { seasonOf, shiftSeason, type Season } from "../core/taste/media.js";
+import type { Ctx } from "../core/taste/types.js";
 import { autoAddedIds, autoAddedInSeason, recordAutoAdd } from "../data/autoadd.js";
 import { noteJobError } from "../data/jobs.js";
 import { context, invalidateContext } from "./context.js";
@@ -15,12 +16,15 @@ import { addSeries, monitorSeason } from "./sonarr.js";
 
 export { autoAddHistory } from "../data/autoadd.js";
 
-/** What auto-add would do for a season, best first, already capped. Read-only. */
-export async function autoAddCandidates(season: Season, year: number): Promise<AutoAddPick[]> {
+/**
+ * What auto-add would do for a season, best first, already capped. Read-only. `ctx`: the context auto-add checked
+ * (fresh, nothing degraded); without it the cached one is used (the preview).
+ */
+export async function autoAddCandidates(season: Season, year: number, ctx?: Ctx): Promise<AutoAddPick[]> {
   const s = getSettings();
   const sonarrOn = sonarrConfigured();
   const done = autoAddedIds();
-  const { picks } = await recommend(season, year);
+  const { picks } = await recommend(season, year, false, ctx);
   return selectAutoAdd(picks, {
     cfg: s.autoAdd,
     done,
@@ -60,7 +64,8 @@ export async function runAutoAddDetailed() {
       );
     const cur = seasonOf();
     for (const { season, year } of [cur, shiftSeason(cur, 1)]) {
-      for (const p of await autoAddCandidates(season, year)) {
+      // The candidates come from the context checked above, never from one built in between (review #11).
+      for (const p of await autoAddCandidates(season, year, ctx)) {
         tried++;
         try {
           const detail = await apply(p, s.autoAdd.search);

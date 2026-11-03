@@ -3,6 +3,7 @@ import { carryOverIds, isCandidate, isCarryOver, relatedIds } from "../core/tast
 import type { Media, Season } from "../core/taste/media.js";
 import { scoreCandidates } from "../core/taste/score.js";
 import { prequelIds } from "../core/taste/sequels.js";
+import type { Ctx } from "../core/taste/types.js";
 import { setVerdict } from "../data/feedback.js";
 import { cachedMedia, getMediaByIdsResult, getSeason } from "./catalog.js";
 import { context, refreshCachedFeedback, tasteEnv } from "./context.js";
@@ -14,18 +15,20 @@ import { getProfile } from "./profile.js";
 /**
  * `degraded` lists the configured sources that couldn't be read (see Ctx), and `partial` the sources a provisional
  * profile was built without: the picks are fine to show, but anything that sends or writes from them (the season
- * alert, auto-add) must check both first. Not part of the API response.
+ * alert, auto-add) must check both first. Not part of the API response. `useCtx` scores against a context the caller
+ * already checked (auto-add), so the picks can't come from a different one built in between.
  */
 export async function recommend(
   season: Season,
   year: number,
   refresh = false,
+  useCtx?: Ctx,
 ): Promise<{ picks: ScoredPick[]; profileBuiltAt: number; degraded: string[]; partial: string[] }> {
   // One settings snapshot for the whole pass, so a change saved while AniList pages load can't mix two configs.
   const env = tasteEnv();
   env.config = structuredClone(env.config);
   const cfg = env.config;
-  const [list, profile, ctx] = await Promise.all([getSeason(season, year, refresh), getProfile(), context(refresh)]);
+  const [list, profile, ctx] = await Promise.all([getSeason(season, year, refresh), getProfile(), useCtx ?? context(refresh)]);
 
   // Carry-overs: anything the user follows that started earlier and is still airing into this season.
   const ids = new Set(list.map((m) => m.id));

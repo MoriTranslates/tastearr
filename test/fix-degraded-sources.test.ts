@@ -5,7 +5,7 @@ import { autoAddedIds, autoAddHistory } from "../server/data/autoadd.js";
 import { listJobs } from "../server/data/jobs.js";
 import { setValue } from "../server/data/kv.js";
 import { addPick } from "../server/services/adding.js";
-import { runAutoAdd } from "../server/services/autoadd.js";
+import { autoAddCandidates, runAutoAdd } from "../server/services/autoadd.js";
 import { context, invalidateContext } from "../server/services/context.js";
 import { refresh } from "../server/services/jobs.js";
 import { clearOverrides, mappingTables } from "../server/services/mapping.js";
@@ -13,7 +13,7 @@ import { warnings } from "../server/services/health.js";
 import { buildProfile, getProfile, rebuildProfile, storedProfile } from "../server/services/profile.js";
 import { addMovie } from "../server/services/radarr.js";
 import { patchSettings } from "../server/services/settings.js";
-import { addSeries, forgetSeries, monitorSeason } from "../server/services/sonarr.js";
+import { addSeries, forgetSeries, monitorSeason, sonarrSeries } from "../server/services/sonarr.js";
 import { feedbackFor } from "./cov-feedback.ts";
 import { seasonOf, shiftSeason } from "../server/core/taste/media.js";
 import { seasonAnnounced } from "../server/data/library.js";
@@ -288,6 +288,32 @@ describe("fix review #2: a provisional profile when there is nothing to keep, an
     forgetSeries();
     await context(true);
     assert.ok(!warnings().some((x) => x.includes('Sonarr "4K"')));
+  });
+});
+
+describe("fix review #11: auto-add decides from the context it checked", () => {
+  test("a forced context never joins a non-forced build that may reuse a library list cached minutes ago", async () => {
+    await sonarrSeries(); // the library list is cached
+    w.sonarrSeries.push(owned(70, 5001)); // added in Sonarr since
+    invalidateContext();
+    const [page, fresh] = await Promise.all([context(), context(true)]);
+    assert.equal(page.lib.has(5001), false, "the page's build used the cached list (fine for display)");
+    assert.equal(fresh.lib.has(5001), true, "the forced build read Sonarr again");
+  });
+
+  test("candidates come from the checked context, not from one built in between", async () => {
+    await buildProfile();
+    w.sonarrSeries.push(owned(71, 5000, { seasons: [{ seasonNumber: 1, monitored: false }] }));
+    invalidateContext();
+    forgetSeries();
+    const checked = await context(true); // what auto-add checked: show 300 (TVDB 5000) is owned
+    // Meanwhile the library view changes (here: the series disappears) and the cache is invalidated.
+    w.sonarrSeries = w.sonarrSeries.filter((x) => x.tvdbId !== 5000);
+    invalidateContext();
+    forgetSeries();
+    const cands = await autoAddCandidates(seasonOf().season, seasonOf().year, checked);
+    const p300 = cands.find((c) => c.id === 300);
+    assert.notEqual(p300?.autoAction, "add", "decided from the checked context, where it is owned");
   });
 });
 
