@@ -1,4 +1,5 @@
 import { PORT } from "./config.js";
+import { clearStaleBackups } from "./data/backup.js";
 import { closeDb } from "./data/db.js";
 import { app } from "./http/app.js";
 import { localNetworkWarnings, SETUP_TOKEN } from "./http/auth.js";
@@ -6,6 +7,10 @@ import { startJobs } from "./services/jobs.js";
 import { getSettings } from "./services/settings.js";
 
 /** Starts Tastearr: the web server, the background jobs, and a clean shutdown. */
+
+// Snapshots a killed download left in /config: full database copies with every API key in cleartext.
+const stale = clearStaleBackups();
+if (stale) app.log.info(`Removed ${stale} leftover backup snapshot${stale > 1 ? "s" : ""} from the config folder`);
 
 const jobs = startJobs((msg) => app.log.warn(msg));
 
