@@ -17,8 +17,19 @@ export interface ImportResult {
   entries: number;
 }
 
+/**
+ * The download took a while: if the username was changed or cleared meanwhile (the user disconnected the list), the
+ * list just fetched belongs to nobody configured any more and must not be written back.
+ */
+function unchanged(field: "anilistUser" | "malUser", before: string, name: string) {
+  if (getSettings().lists[field] !== before)
+    throw new Error(`The ${name} user changed while its list was downloading; the downloaded list was not saved`);
+}
+
 export async function importAnilist(user: string): Promise<ImportResult> {
+  const before = getSettings().lists.anilistUser;
   const entries = await anilistUserList(user);
+  unchanged("anilistUser", before, "AniList");
   replaceListEntries(
     "anilist",
     entries.map((e) => ({ id: e.mediaId, status: e.status, score: e.score || null, progress: e.progress ?? null })),
@@ -36,6 +47,7 @@ const MAL_STATUS: Record<string, string> = {
 
 export async function importMal(user: string, clientId: string): Promise<ImportResult> {
   if (!clientId) throw fail("MyAnimeList needs a free API client ID (myanimelist.net/apiconfig)", 400);
+  const before = getSettings().lists.malUser;
   const { byMal } = await mappingTables();
   const rows: ListRow[] = [];
   for (const e of await malUserList(user, clientId)) {
@@ -43,6 +55,7 @@ export async function importMal(user: string, clientId: string): Promise<ImportR
     if (id)
       rows.push({ id, status: MAL_STATUS[e.status] ?? "PLANNING", score: e.score ? e.score * 10 : null, progress: e.episodesWatched });
   }
+  unchanged("malUser", before, "MyAnimeList");
   replaceListEntries("mal", rows);
   return { source: "mal", entries: rows.length };
 }

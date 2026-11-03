@@ -27,7 +27,8 @@ export function settingsRoutes(app: FastifyInstance) {
   app.get("/api/settings", async (): Promise<PublicSettings> => publicSettings());
   app.put<{ Body: Partial<Settings> }>("/api/settings", async (req): Promise<PublicSettings> => {
     updateSettings(req.body);
-    // A list the user disconnected (username cleared) stops counting right away, not at the next profile build.
+    // A list the user disconnected (username cleared) leaves the picks right away. An import already downloading it
+    // doesn't save it (lists.ts). The stored taste profile still reflects it until its next rebuild.
     forgetUnconfiguredLists();
     invalidateContext();
     return publicSettings();
