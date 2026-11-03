@@ -1,6 +1,7 @@
 import "./env.ts";
 import assert from "node:assert/strict";
 import { after, afterEach, before, test } from "node:test";
+import { inCidr } from "../server/core/network.js";
 import { app } from "../server/http/app.js";
 import { localNetworkWarnings, SETUP_TOKEN } from "../server/http/auth.js";
 import { setBypassLocal } from "../server/services/settings.js";
@@ -89,4 +90,35 @@ test("fix review #12: a TASTEARR_LOCAL_NETWORKS range the bypass will ignore is 
   assert.deepEqual(localNetworkWarnings(), []);
   delete process.env.TASTEARR_LOCAL_NETWORKS;
   assert.deepEqual(localNetworkWarnings(), []);
+});
+
+test("TASTEARR_LOCAL_NETWORKS accepts IPv6 CIDRs, so a ULA home LAN can opt back in", async () => {
+  process.env.TASTEARR_LOCAL_NETWORKS = "fd12:3456::/32, 192.168.1.0/24";
+  assert.equal((await settings("fd12:3456::7")).statusCode, 200);
+  assert.equal((await settings("fd12:3456:ffff::1")).statusCode, 200);
+  assert.equal((await settings("fd00::1")).statusCode, 401, "another ULA network isn't listed");
+  assert.equal((await settings("192.168.1.20")).statusCode, 200);
+});
+
+test("a malformed prefix matches nothing, IPv4 or IPv6 (a /33 once counted half the internet as home)", () => {
+  for (const c of [
+    "0.0.0.0/33",
+    "10.0.0.0/",
+    "10.0.0.0/abc",
+    "10.0.0.0/-1",
+    "10.0.0.0/1.5",
+    "10.0.0.0/ 8",
+    "10.0.0.0/08x",
+    "::/129",
+    "fd00::/",
+    "fd00::/x",
+  ])
+    for (const ip of ["1.2.3.4", "10.0.0.1", "200.1.1.1", "fd00::1", "2001:db8::1"]) assert.equal(inCidr(ip, c), false, `${ip} in ${c}`);
+  assert.equal(inCidr("10.1.2.3", "10.0.0.0/8"), true, "well-formed prefixes still work");
+  assert.equal(inCidr("fd12:3456::9", "fd12:3456::/32"), true);
+  assert.equal(inCidr("fd12:3457::9", "fd12:3456::/32"), false);
+  assert.equal(inCidr("::ffff:10.1.2.3", "10.0.0.0/8"), true, "IPv4-mapped IPv6 is judged as IPv4");
+  assert.equal(inCidr("10.1.2.3", "::/0"), false, "an IPv6 range never matches an IPv4 address");
+  process.env.TASTEARR_LOCAL_NETWORKS = "0.0.0.0/33";
+  assert.match(localNetworkWarnings().join(" "), /0\.0\.0\.0\/33.*not a valid/);
 });
