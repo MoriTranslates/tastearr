@@ -21,7 +21,6 @@ try {
 }
 
 export const db = new DatabaseSync(path.join(CONFIG_DIR, "tastearr.db"));
-db.exec("PRAGMA journal_mode = WAL;");
 
 /**
  * Schema migrations, applied in order; PRAGMA user_version records how many have run.
@@ -64,6 +63,16 @@ const MIGRATIONS: string[] = [
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+// A database last used by a newer Tastearr (downgraded image, a backup from a newer version): its schema has steps
+// this build doesn't know, so running against it could misread or damage it. Stop before writing anything.
+if (current > MIGRATIONS.length) {
+  console.error(
+    `This tastearr.db was last used by a newer version of Tastearr (database version ${current}; this version knows up to ${MIGRATIONS.length}). Update Tastearr to the newer version again, or restore a backup made with this version. Nothing was changed.`,
+  );
+  db.close();
+  process.exit(1);
+}
+db.exec("PRAGMA journal_mode = WAL;");
 for (let v = current; v < MIGRATIONS.length; v++) {
   db.exec("BEGIN");
   try {
