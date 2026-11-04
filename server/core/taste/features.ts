@@ -98,7 +98,24 @@ export function eligible(m: Media, t: TasteConfig["training"]) {
 
 // 12-minute half-length series are real shows (and often ecchi/comedy favourites) even when AniList files them as
 // TV_SHORT; only true minis are "shorts". Episode length decides when it's known, the format otherwise.
-export const isShort = (m: Media) => m.format !== "MOVIE" && (m.duration ? m.duration <= 9 : m.format === "TV_SHORT");
+const isShortWithin = (m: Media, maxMinutes: number) =>
+  m.format !== "MOVIE" && (m.duration ? m.duration <= maxMinutes : m.format === "TV_SHORT");
+export const isShort = (m: Media) => isShortWithin(m, 9);
+
+/**
+ * "Skip explicit shorts". The user likes ecchi and fan service but dislikes pure porn: shows that actually show sex.
+ * Those are typically shorts (6-12 min, AniList TV_SHORT) tagged Ecchi with a very high Nudity rank, and AniList doesn't
+ * flag them isAdult. Full-length ecchi (24 min, Nudity 70-82) is fine and must stay. Dropping or thumbs-downing alone
+ * can't fix it: the profile learns traits, and these share Ecchi/Nudity with ecchi the user likes. Training is
+ * unchanged; this only keeps such shows out of picks and auto-add.
+ * No extra "sex" tag signal: AniList has none on all of them (only act tags like "Public Sex" on single shows).
+ */
+export const EXPLICIT_SHORT_MAX_MINUTES = 15;
+export const EXPLICIT_NUDITY_MIN_RANK = 75;
+export const isExplicitShort = (m: Media) =>
+  isShortWithin(m, EXPLICIT_SHORT_MAX_MINUTES) &&
+  m.genres.includes("Ecchi") &&
+  m.tags.some((t) => t.name === "Nudity" && t.rank >= EXPLICIT_NUDITY_MIN_RANK);
 
 export function streamingLinks(m: Media) {
   const seen = new Set<string>();

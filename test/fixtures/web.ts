@@ -100,7 +100,7 @@ export const settings = (): PublicSettings => ({
   media: { type: "none", url: "", token: "", userId: "", libraryIds: [] },
   lists: { anilistUser: "adam", malUser: "", malClientId: "" },
   training: { seasons: 8, minTagRank: 60, formats: ["TV"], countries: ["JP"] },
-  filters: { excludeGenres: [], excludeTags: [], hideInLibrary: false, hideShorts: false, noGore: false },
+  filters: { excludeGenres: [], excludeTags: [], hideInLibrary: false, hideShorts: false, noGore: false, skipExplicitShorts: true },
   display: { titleLanguage: "english", services: [] },
   sonarrExtra: [],
   autoAdd: { enabled: false, minMatch: 85, newShows: true, sequels: true, movies: false, maxPerSeason: 5, search: true },

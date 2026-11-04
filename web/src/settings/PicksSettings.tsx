@@ -129,6 +129,18 @@ export function PicksSettings({ s, save }: { s: S; save: (p: Partial<S>) => Prom
           <input type="checkbox" checked={filters.hideShorts} onChange={(e) => setFilters({ ...filters, hideShorts: e.target.checked })} />{" "}
           Fold away the Shorts section by default
         </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={filters.skipExplicitShorts}
+            onChange={(e) => setFilters({ ...filters, skipExplicitShorts: e.target.checked })}
+          />{" "}
+          Skip explicit shorts
+        </label>
+        <p className="muted small">
+          Never picks or auto-adds short (15 min or less) Ecchi shows with a very high Nudity tag: they show actual sex rather than fan
+          service. Full-length ecchi is not affected.
+        </p>
       </div>
       <p className="muted small">Filters never hide sequels of shows you watch. Your quiz genre answers live on the Quiz page.</p>
       <div className="row end">

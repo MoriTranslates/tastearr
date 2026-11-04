@@ -82,7 +82,7 @@ const env = (candidates: Media[]): TasteEnv => {
     media: (id) => byId.get(id) ?? null,
     config: {
       training: { seasons: 8, minTagRank: 60, formats: ["TV"], countries: ["JP"] },
-      filters: { excludeGenres: [], excludeTags: [], noGore: false },
+      filters: { excludeGenres: [], excludeTags: [], noGore: false, skipExplicitShorts: false },
       genrePrefs: {},
       titleLanguage: "english",
       sonarrOn: false,

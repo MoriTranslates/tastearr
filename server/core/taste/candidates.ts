@@ -1,4 +1,4 @@
-import { CANDIDATE_FORMATS } from "./features.js";
+import { CANDIDATE_FORMATS, isExplicitShort } from "./features.js";
 import { SEASONS, type Media, type Season } from "./media.js";
 import { parentIds, prequelIds, sourceIds } from "./sequels.js";
 import type { Ctx, TasteConfig } from "./types.js";
@@ -8,9 +8,13 @@ import type { Ctx, TasteConfig } from "./types.js";
 /** First day of a season, local time. */
 export const seasonStart = (season: Season, year: number) => new Date(year, SEASONS.indexOf(season) * 3, 1).getTime();
 
-/** A show worth scoring at all: not adult, a TV/ONA/short/movie format, from a country the user trains on. */
+/**
+ * A show worth scoring at all: not adult, a TV/ONA/short/movie format, from a country the user trains on, and (unless
+ * the user turned it off) not an explicit short: it shows actual sex, which the user doesn't want (see isExplicitShort).
+ */
 export function isCandidate(m: Media, cfg: TasteConfig) {
   const countries = new Set(cfg.training.countries);
+  if (cfg.filters.skipExplicitShorts && isExplicitShort(m)) return false;
   return !m.isAdult && !!m.format && CANDIDATE_FORMATS.has(m.format) && (!m.countryOfOrigin || countries.has(m.countryOfOrigin));
 }
 

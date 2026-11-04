@@ -182,7 +182,14 @@ export interface PublicSettings {
   media: { type: "none" | "plex" | "jellyfin"; url: string; token: string; userId: string; libraryIds: string[] };
   lists: { anilistUser: string; malUser: string; malClientId: string };
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
-  filters: { excludeGenres: string[]; excludeTags: string[]; hideInLibrary: boolean; hideShorts: boolean; noGore: boolean };
+  filters: {
+    excludeGenres: string[];
+    excludeTags: string[];
+    hideInLibrary: boolean;
+    hideShorts: boolean;
+    noGore: boolean;
+    skipExplicitShorts: boolean;
+  };
   display: { titleLanguage: "english" | "romaji" | "native"; services: string[] };
   sonarrExtra: { name: string; url: string; apiKey: string }[];
   autoAdd: {

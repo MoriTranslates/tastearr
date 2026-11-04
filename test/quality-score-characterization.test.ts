@@ -41,7 +41,7 @@ const profile: TasteProfile = {
 
 const config: TasteConfig = {
   training: { seasons: 8, minTagRank: 60, formats: ["TV"], countries: ["JP"] },
-  filters: { excludeGenres: ["Horror"], excludeTags: ["Kids"], noGore: true },
+  filters: { excludeGenres: ["Horror"], excludeTags: ["Kids"], noGore: true, skipExplicitShorts: false },
   genrePrefs: { Romance: "never", "T:Food": "never" },
   titleLanguage: "english",
   sonarrOn: true,

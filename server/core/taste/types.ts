@@ -96,7 +96,7 @@ export interface Ctx {
 /** The settings the engine reads. */
 export interface TasteConfig {
   training: { seasons: number; minTagRank: number; formats: string[]; countries: string[] };
-  filters: { excludeGenres: string[]; excludeTags: string[]; noGore: boolean };
+  filters: { excludeGenres: string[]; excludeTags: string[]; noGore: boolean; skipExplicitShorts: boolean };
   /** Quiz answers for genres ("Fantasy") and themes ("T:Food"). */
   genrePrefs: Record<string, Pref>;
   titleLanguage: "english" | "romaji" | "native";
