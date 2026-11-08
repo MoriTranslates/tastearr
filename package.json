@@ -23,23 +23,23 @@
     "tools:install": "npm ci --prefix tools/lint --no-audit --no-fund"
   },
   "dependencies": {
-    "@fastify/cookie": "^11.1.3",
-    "@fastify/static": "^10.1.7",
-    "fastify": "^5.12.7"
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/static": "^10.1.10",
+    "fastify": "^5.12.8"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^21.0.4",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5"
+    "vite": "^8.3.6"
   }
 }
